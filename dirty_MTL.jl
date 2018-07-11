@@ -1,3 +1,5 @@
+#Peter DeWeirdt
+
 #Pkg.add("Plots")
 #Pkg.add("StatPlots")
 #Pkg.add("MAT")
