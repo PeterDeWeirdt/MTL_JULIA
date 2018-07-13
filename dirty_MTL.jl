@@ -1,4 +1,5 @@
 #Peter DeWeirdt
+#07/13/2018
 
 #Pkg.add("Plots")
 #Pkg.add("StatPlots")
