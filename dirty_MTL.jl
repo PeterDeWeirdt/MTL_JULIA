@@ -10,11 +10,12 @@ using Plots
 using ProgressMeter
 using StatPlots
 using MAT
+using Gallium
 pyplot()
 
 function preprocess_data(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1};
     score_X = true, score_Y = true)
-    #z-score data"
+    """z-score data"""
     ntasks = length(Xs)
     for k in 1:ntasks
         X = Xs[k]
@@ -31,13 +32,11 @@ end
 
 function covariance_update_terms(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1};
     calcCs = true, calcDs = true)
-    #=
-    Returns C and D, covariance update terms for OLS fit
+    """Returns C and D, covariance update terms for OLS fit
     C: t(X)*Y -- correlation between predictors and response
     D: t(X)*X -- correlation between predictors and predictors
     ref: Friedman, Hastie, Tibshirani, 2010 in Journal of Statistical Software
-        Regularization Paths for Generalized Linear Models via Coordinate Descent.
-    =#
+        Regularization Paths for Generalized Linear Models via Coordinate Descent."""
     ntasks = length(Xs)
     Cs = Array{Array{Float64,1},1}(ntasks)
     Ds = Array{Array{Float64,2},1}(ntasks)
@@ -53,11 +52,9 @@ end
 
 function updateS(Cs::Array{Array{Float64,1},1}, Ds::Array{Array{Float64,2},1},
     B::Array{Float64,2}, S::Array{Float64,2}, lamS::Float64, P::Array{Float64,2})
-    #=
-    returns updated coefficients for S-- (sparse matrix: predictors x tasks)
+    """returns updated coefficients for S-- (sparse matrix: predictors x tasks)
     lasso regularized -- using cyclical coordinate descent and
-    soft-thresholding
-    =#
+    soft-thresholding"""
     ntasks = length(Cs)
     npreds = size(P, 1)
     for k = 1:ntasks
@@ -90,13 +87,11 @@ end
 
 function updateB(Cs::Array{Array{Float64,1},1}, Ds::Array{Array{Float64,2},1},
     B::Array{Float64,2}, S::Array{Float64,2}, lamB::Float64)
-    #=
-    returns updated coefficients for B (predictors x tasks)
+    """returns updated coefficients for B (predictors x tasks)
         block regularized (l_1/l_inf) -- using cyclical coordinate descent and
         soft-thresholding on the l_1 norm across tasks
         reference: Liu et al, ICML 2009. Blockwise coordinate descent procedures
-        for the multi-task lasso, with applications to neural semantic basis discovery.
-    =#
+        for the multi-task lasso, with applications to neural semantic basis discovery."""
     ntasks = length(Cs)
     npreds = size(B, 1)
     #cycle through predictors
@@ -154,12 +149,10 @@ function dirty_multitask_lasso(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Fl
     P = nothing , lamB = 0., lamS = 0.,
     Cs = nothing, Ds = nothing, S = nothing, B = nothing, maxiter = 1000,
     tolerance = 1e-7, score = false, ntasks = nothing, npreds = nothing)
-    #=
-    Fits regression model in which the weights matrix W (predictors x tasks)
+    """Fits regression model in which the weights matrix W (predictors x tasks)
     is decomposed in two components: B that captures block structure across tasks
     and S that allows for the differences.
-    reference: Jalali et al., NIPS 2010. A Dirty Model for Multi-task Learning.
-    =#
+    reference: Jalali et al., NIPS 2010. A Dirty Model for Multi-task Learning."""
     if ntasks == nothing;ntasks = length(Xs);end
     if npreds == nothing;npreds = size(Xs[1], 2);end
     if score
@@ -270,9 +263,7 @@ end
 function ebic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
     W::Array{Float64,2}, n_tasks::Int64, n_samples::Array{Int64,1}, n_preds::Int64;
     gamma = 1)
-    #=
-    Calculate EBIC for each task and take the mean
-    =#
+    """Calculate EBIC for each task and take the mean"""
     EBIC = Array{Float64,1}(n_tasks)
     for k in 1:n_tasks
         samps = n_samples[k]
@@ -293,17 +284,29 @@ function ebic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
     return(mean(EBIC))
 end
 
+function kfoldperm(N::Int64,k::Int64)
+    n,r = divrem(N,k)
+    b = collect(1:n:N+1)
+    for i in 1:length(b)
+        b[i] += i > r ? r : i-1
+    end
+    p = randperm(N)
+    return [p[r] for r in [b[i]:b[i+1]-1 for i=1:k]]
+end
+
 function fit_gene(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
     Ds::Array{Array{Float64,2},1},ntasks::Int64, npreds::Int64,
     nsamps::Array{Int64,1}, lamSs::Array{Float64,1};nB = 3,
-    prior = nothing)
-    #= For one gene, calculate EBIC for each pair of lamS, lamB
-    Note: sliding window for lambdaB
-    =#
-    Cs,~ = covariance_update_terms(Xs, Ys, calcDs = false, calcCs = true)
+    prior = nothing, fit = :ebic, nfolds = 5)
+    """For one gene, calculate fit for each pair of lamS, lamB
+    fit options -- :ebic and :cv
+    Note: sliding window for lambdaB"""
+    if fit == :ebic
+        Cs,~ = covariance_update_terms(Xs, Ys, calcDs = false, calcCs = true)
+    end
     nS = length(lamSs)
     lambdas = Array{Float64, 2}(nS*nB, 2)
-    EBICs = Array{Float64, 1}(nS*nB)
+    Fits = Array{Float64, 1}(nS*nB)
     #Use a warm start
     lambdasi = 1
     outerS = nothing
@@ -316,26 +319,73 @@ function fit_gene(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
         B = outerB
         for Bi = 1:nB
             lamB = lamBs[(nB + 1) - Bi]
-            W,B,S = dirty_multitask_lasso(Xs, Ys;
-                P = prior, lamB = lamB, lamS = lamS,
-                Cs = Cs, Ds = Ds, S = S, B = B, ntasks = ntasks, npreds = npreds)
+            if fit == :ebic
+                W,B,S = dirty_multitask_lasso(Xs, Ys;
+                    P = prior, lamB = lamB, lamS = lamS,
+                    Cs = Cs, Ds = Ds, S = S, B = B, ntasks = ntasks, npreds = npreds)
+                currFit = ebic(Xs, Ys, W, ntasks, nsamps, npreds)
+            elseif fit == :cv
+                folds = Array{Array{Array{Int64,1},1},1}(ntasks)
+                for task = 1:ntasks
+                    folds[task] = kfoldperm(nsamps[task], nfolds)
+                end
+                foldErrors = Array{Float64, 1}(nfolds)
+                for fold = 1:nfolds
+                    LOXs = Array{Array{Float64,2},1}(ntasks)
+                    LOYs = Array{Array{Float64,1},1}(ntasks)
+                    InXs = Array{Array{Float64,2},1}(ntasks)
+                    InYs = Array{Array{Float64,1},1}(ntasks)
+                    for task = 1:ntasks
+                        currFold = folds[task][fold]
+                        LOXs[task] = Xs[task][currFold,:]
+                        LOYs[task] = Ys[task][currFold]
+                        keepInds = (1:nsamps[task])[filter((x) -> !(x in currFold),1:nsamps[task])]
+                        InXs[task] = Xs[task][keepInds,:]
+                        InYs[task] = Ys[task][keepInds]
+                    end
+                    W,B,S = dirty_multitask_lasso(InXs, InYs;
+                        P = prior, lamB = lamB, lamS = lamS,
+                        S = S, B = B, ntasks = ntasks, npreds = npreds)
+                    sq_err = 0
+                    for k = 1:ntasks
+                        sq_err += get_RSS(LOXs[k],LOYs[k],W[:,k])
+                        if sq_err < 0
+                            println(get_RSS(LOXs[k],LOYs[k],W[:,k]))
+                        end
+                    end
+                    foldErrors[fold] = sq_err
+                end
+                currFit = mean(foldErrors)
+            else
+                println("Fit method not supported")
+            end
             if Bi == 1
                 outerS = S
                 outerB = B
             end
+            Fits[lambdasi] = currFit
             lambdas[lambdasi,:] = [lamS,lamB]
-            EBICs[lambdasi] = ebic(Xs, Ys, W, ntasks, nsamps, npreds)
             lambdasi += 1
         end
     end
-    return(EBICs, lambdas)
+    return(Fits, lambdas)
+end
+
+function within1seMin(data::Array{Float64,1})
+    #= Get Largest lambda lambda value within 1se of the minimum =#
+    se = std(data)/sqrt(length(data))
+    minval, minind = findmin(data)
+    maxval = minval + se
+    closeEnough = find(data .< maxval);
+    ind1se = maximum(closeEnough[closeEnough .>= minind])
+    return(ind1se)
 end
 
 function fit_network(Xs::Array{Array{Float64,2},1},
     YSs::Array{Array{Array{Float64,1},1},1}; Smin = 0.01, Smax = 1,
-    Ssteps = 10, nB = 5, prior = nothing)
-    #= Calculate EBIC for each gene in a network. Plot grid of median EBIC.
-    Return optimal lambdaS and lambdaB, based on median EBIC score. =#
+    Ssteps = 10, nB = 4, prior = nothing, fit = :ebic)
+    """Calculate fit for each gene in a network. Plot grid of median fits.
+    Return lambdaS and lambdaB within 1 se of the minimum fit."""
     ntasks = length(Xs)
     Xs,~ = preprocess_data(Xs, YSs[1], score_X = true, score_Y = false)
     ~,Ds = covariance_update_terms(Xs, YSs[1], calcCs = false, calcDs = true)
@@ -348,15 +398,31 @@ function fit_network(Xs::Array{Array{Float64,2},1},
     lamSlog10step = 1/Ssteps
     logLamSRange = log10(Smin):lamSlog10step:log10(Smax)
     lamSs = 10.^logLamSRange
-    networkEBICs = Array{Float64,2}(length(lamSs)*nB,ngenes)
+    geneFits = Array{Float64,2}(length(lamSs)*nB,ngenes)
     lambdas = Array{Float64,2}(length(lamSs)*nB,2)
     @showprogress 1 for genei = 1:ngenes
         ~,Ys = preprocess_data(Xs, YSs[genei], score_X = false, score_Y = true)
-        EBICs, lambdas = fit_gene(Xs, Ys, Ds,ntasks, npreds, nsamps, lamSs,
-        nB = nB, prior = prior)
-        networkEBICs[:,genei] = EBICs
+        Fits, lambdas = fit_gene(Xs, Ys, Ds,ntasks, npreds, nsamps, lamSs,
+        nB = nB, prior = prior, fit = fit)
+        geneFits[:,genei] = Fits
     end
-    return networkEBICs, lambdas
+    networkFits = median(geneFits,2)
+    lambda_sum = lambdas[:,1] + lambdas[:,2]/2
+    sorted_indexes = sortperm(lambda_sum)
+    sorted_lambda = lambdas[sorted_indexes,:]
+    sortedFits = networkFits[sorted_indexes]
+    chosenInd = within1seMin(sortedFits)
+    chosenLams = sorted_lambda[chosenInd,:]
+    minInd = indmin(networkFits)
+    p::Plots.Plot = plot(lambdas[:,1],lambdas[:,2], seriestype=:scatter,marker_z = networkFits,
+    xlabel = "lambda S", ylabel = "lambda B", label = "", colorbar_title = "Fit",
+    xscale = :log10, yscale = :log10, xlims = (10^(log10(minimum(lambdas[:,1]))-0.1),
+    10^(log10(maximum(lambdas[:,1]))+0.1)),
+    ylims = (10^(log10(minimum(lambdas[:,2]))-0.1), 10^(log10(maximum(lambdas[:,2]))+0.1)),
+    annotations = [(chosenLams[1], chosenLams[2], text("o", :darkorange)),
+    (lambdas[minInd,1], lambdas[minInd,2], text("x", :violet))])
+    display(p)
+    return chosenLams
 end
 
 function simulate_data(ntasks::Int64, npreds::Int64, nsamps::Array{Int64, 1},
@@ -412,25 +478,28 @@ function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Array{Float
     return networks
 end
 
+function buildTRNs(Xs::Array{Array{Float64,2},1},
+    YSs::Array{Array{Array{Float64,1},1},1}, lamS, lamB; nboots = 50)
+    """Rank TF-gene interactions according to confidence:
+    1 - var(residuals_i)/var(residual[~TF])."""
+end
+
+
+
+end
 
 function test_fit()
-    Xs,YSs,true_nets =  simulate_data(2, 50, [50,50],15,1)
-    EBICs,lambdas = fit_network(Xs, YSs)
-    optimal_index = indmin(EBICs)
-    optLamS = lambdas[optimal_index,1]
-    optLamB = lambdas[optimal_index,2]
+    Xs,YSs,true_nets =  simulate_data(2, 50, [50,50],15,2)
+    lambdas = fit_network(Xs, YSs, fit = :ebic)
+    optLamS = lambdas[1]
+    optLamB = lambdas[2]
     optimal_nets = GetBestNets(Xs, YSs, optLamS, optLamB)
     hamming_dist = Array{Int64,1}(length(optimal_nets))
     for i = 1:length(optimal_nets)
+        println(optimal_nets[i])
+        println(true_nets[i])
         hamming_dist[i] = sum(abs.(abs.(sign.(true_nets[i])) - abs.(sign.(optimal_nets[i]))))
     end
-    p::Plots.Plot = plot(lambdas[:,1],lambdas[:,2], seriestype=:scatter,marker_z = EBICs,
-    xlabel = "lambda S", ylabel = "lambda B", label = "", colorbar_title = "ebic",
-    xscale = :log10, yscale = :log10, xlims = (10^(log10(minimum(lambdas[:,1]))-0.1),
-    10^(log10(maximum(lambdas[:,1]))+0.1)),
-    ylims = (10^(log10(minimum(lambdas[:,2]))-0.1), 10^(log10(maximum(lambdas[:,2]))+0.1)),
-    annotations = (optLamS, optLamB, text("x", :red)))
-    display(p)
     return hamming_dist
 end
 
