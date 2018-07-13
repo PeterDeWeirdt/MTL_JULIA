@@ -319,6 +319,7 @@ function fit_gene(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
         S = outerS
         B = outerB
         for Bi = 1:nB
+            println(lambdasi)
             lamB = lamBs[(nB + 1) - Bi]
             if fit == :ebic
                 W,B,S = dirty_multitask_lasso(Xs, Ys;
@@ -401,8 +402,9 @@ function fit_network(Xs::Array{Array{Float64,2},1},
     lamSs = 10.^logLamSRange
     geneFits = Array{Float64,2}(length(lamSs)*nB,ngenes)
     lambdas = Array{Float64,2}(length(lamSs)*nB,2)
-    println("Estimating fits for " * string(ngenes) * "genes")
-    @showprogress 1 for genei = 1:ngenes
+    println("Estimating fits for " * string(ngenes) * " genes")
+    @showprogress for genei = 1:ngenes
+        println(genei)
         ~,Ys = preprocess_data(Xs, YSs[genei], score_X = false, score_Y = true)
         Fits, lambdas = fit_gene(Xs, Ys, Ds,ntasks, npreds, nsamps, lamSs,
         nB = nB, prior = prior, fit = fit)
@@ -531,13 +533,12 @@ function time_one_gene(ntrials)
     return ts, hammings
 end
 
-function get_partitions(data::Array{Any,1}, nparts::Int64)
+function get_partitions(data::Array{Float64,1}, nsamps::Array{Int64,1})
     #Assume length(data) %% nparts = 0
+    nparts = length(nsamps)
     partitionedData = Array{Array{Any,1},1}(nparts)
-    dataLength = length(data)
-    partLength = dataLength/nparts
     for part = 1:nparts
-        partitionedData[part] = data[((part-1)*partLength + 1):part*partLength]
+        partitionedData[part] = data[(sum(nsamps[1:(part-1)])+1):sum(nsamps[1:part])]
     end
     return(partitionedData)
 end
@@ -565,15 +566,17 @@ function MTL()
             ngenes = size(prior,2)
             nTFs = size(prior,1)
             tempYSs = inputs["responseMat"]'
+        else
+            tempYSs = [tempYSs;inputs["responseMat"]']
         end
-        [tempYSs;inputs["responseMat"]']
+
     end
 
     println("Getting gene responses")
     YSs = Array{Array{Array{Float64,1},1}}(ngenes)
     @showprogress for gene = 1:ngenes
-        YSs[gene] = get_partitions(tempYSs[:,gene])
+        YSs[gene] = get_partitions(tempYSs[:,gene],nsamps)
     end
-    lams =  fit_network(Xs, YSs::Array{Array{Array{Float64,1},1},1}, Smin = 0.01,
+    lams =  fit_network(Xs, YSs::Array{Array{Array{Float64,1},1},1}, Smin = 0.05,
     Smax = 1, Ssteps = 10, nB = 4, prior = prior, fit = :ebic)
 end
