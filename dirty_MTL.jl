@@ -11,7 +11,7 @@ using Plots
 using ProgressMeter
 using StatPlots
 using MAT
-using Gallium
+using IterTools
 pyplot()
 
 function preprocess_data(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1};
@@ -401,6 +401,7 @@ function fit_network(Xs::Array{Array{Float64,2},1},
     lamSs = 10.^logLamSRange
     geneFits = Array{Float64,2}(length(lamSs)*nB,ngenes)
     lambdas = Array{Float64,2}(length(lamSs)*nB,2)
+    println("Estimating fits for " * string(ngenes) * "genes")
     @showprogress 1 for genei = 1:ngenes
         ~,Ys = preprocess_data(Xs, YSs[genei], score_X = false, score_Y = true)
         Fits, lambdas = fit_gene(Xs, Ys, Ds,ntasks, npreds, nsamps, lamSs,
@@ -423,6 +424,13 @@ function fit_network(Xs::Array{Array{Float64,2},1},
     annotations = [(chosenLams[1], chosenLams[2], text("o", :darkorange)),
     (lambdas[minInd,1], lambdas[minInd,2], text("x", :violet))])
     display(p)
+    fitsOut = "EstimatedFits_" * string(fit)
+    savefig(fitsOut * ".pdf")
+    matwrite(fitsOut * ".mat", Dict(
+            "lambdas" => lambdas,
+            "geneFits" => geneFits,
+            "networkFits" => networkFits
+    ))
     return chosenLams
 end
 
@@ -487,8 +495,6 @@ end
 
 
 
-end
-
 function test_fit()
     Xs,YSs,true_nets =  simulate_data(2, 50, [50,50],15,2)
     lambdas = fit_network(Xs, YSs, fit = :ebic)
@@ -523,4 +529,51 @@ function time_one_gene(ntrials)
     display(tPlot)
     display(hPlot)
     return ts, hammings
+end
+
+function get_partitions(data::Array{Any,1}, nparts::Int64)
+    #Assume length(data) %% nparts = 0
+    partitionedData = Array{Array{Any,1},1}(nparts)
+    dataLength = length(data)
+    partLength = dataLength/nparts
+    for part = 1:nparts
+        partitionedData[part] = data[((part-1)*partLength + 1):part*partLength]
+    end
+    return(partitionedData)
+end
+
+function MTL()
+    """MAIN: fit TRNs for multiple tasks using multitask learning"""
+    TaskMatPaths = ["./fitSetup/RNAseq_ATAC_Th17_bias50.mat",
+        "./fitSetup/scRNAseq_ATAC_Th17_bias50.mat"]
+    ntasks = length(TaskMatPaths)
+    nsamps = Array{Int64}(ntasks)
+    ngenes = Int64
+    nTFs = Int64
+    taskMTLinputs = Array{Dict{String,Any},1}(ntasks)
+    Xs = Array{Array{Float64,2},1}(ntasks)
+    tempYSs = Array{Float64,2}(0,0)
+    prior = Array{Float64,2}(0,0)
+    @showprogress for task = 1:ntasks
+        inputs = matread(TaskMatPaths[task])
+        taskMTLinputs[task] = inputs
+        Xs[task] = inputs["predictorMat"]'
+        currSamps = size(Xs[task],1)
+        nsamps[task] = currSamps
+        if task == 1
+            prior = inputs["priorWeightsMat"]'
+            ngenes = size(prior,2)
+            nTFs = size(prior,1)
+            tempYSs = inputs["responseMat"]'
+        end
+        [tempYSs;inputs["responseMat"]']
+    end
+
+    println("Getting gene responses")
+    YSs = Array{Array{Array{Float64,1},1}}(ngenes)
+    @showprogress for gene = 1:ngenes
+        YSs[gene] = get_partitions(tempYSs[:,gene])
+    end
+    lams =  fit_network(Xs, YSs::Array{Array{Array{Float64,1},1},1}, Smin = 0.01,
+    Smax = 1, Ssteps = 10, nB = 4, prior = prior, fit = :ebic)
 end
