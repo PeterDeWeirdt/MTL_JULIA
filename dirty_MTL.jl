@@ -5,6 +5,7 @@
 #Pkg.add("StatPlots")
 #Pkg.add("MAT")
 #Pkg.add("OhMyREPL")
+Pkg.add("MultivariateStats")
 using OhMyREPL
 using StatsBase
 using Plots
@@ -12,6 +13,7 @@ using ProgressMeter
 using StatPlots
 using MAT
 using IterTools
+using MultivariateStats
 pyplot()
 
 function preprocess_data(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1};
@@ -406,6 +408,7 @@ function fit_network(Xs::Array{Array{Float64,2},1},
     @showprogress for genei = 1:ngenes
         println(genei)
         ~,Ys = preprocess_data(Xs, YSs[genei], score_X = false, score_Y = true)
+        YSs[genei] = Ys
         Fits, lambdas = fit_gene(Xs, Ys, Ds,ntasks, npreds, nsamps, lamSs,
         nB = nB, prior = prior, fit = fit)
         geneFits[:,genei] = Fits
@@ -433,7 +436,7 @@ function fit_network(Xs::Array{Array{Float64,2},1},
             "geneFits" => geneFits,
             "networkFits" => networkFits
     ))
-    return chosenLams
+    return Xs, YSs, chosenLams
 end
 
 function simulate_data(ntasks::Int64, npreds::Int64, nsamps::Array{Int64, 1},
@@ -466,36 +469,69 @@ function simulate_data(ntasks::Int64, npreds::Int64, nsamps::Array{Int64, 1},
 end
 
 function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Array{Float64,1},1}},
-    lamS::Float64, lamB::Float64; prior = nothing)
-    ntasks = length(Xs)
-    Xs,~ = preprocess_data(Xs, YSs[1], score_X = true, score_Y = false)
-    ~,Ds = covariance_update_terms(Xs, YSs[1], calcCs = false, calcDs = true)
+    lamS::Float64, lamB::Float64; prior = nothing, samples = nothing, ntasks = nothing)
+    """ Given an optimal lamS and lamB return a matrix of confidences for edge
+    interactions, and the sign of those interactions. Current options for methods
+    are confidences and ranks"""
+    if ntasks == nothing;ntasks = length(Xs);end
+    if samples == nothing
+        samples = Array{Array{Float64,1},1}(ntasks)
+        for task = 1:ntasks
+            currSamps = size(Xs[task],1)
+            samples[task] = currSamps
+        end
+    end
+    sampleYSs = deepcopy(YSs)
+    sampleXs = Array{Array{Float64,2},1}(ntasks)
+    for task = 1:ntasks
+        sampleXs[task] =  Xs[task][samples[task],:]
+    end
+    currXs,~ = preprocess_data(sampleXs, YSs[1], score_X = true, score_Y = false)
+    ~,Ds = covariance_update_terms(currXs, YSs[1], calcCs = false, calcDs = true)
     npreds = size(Xs[1], 2)
     ngenes = length(YSs)
-    networks = Array{Array{Float64,2},1}(ntasks)
+    edge_confs = Array{Array{Float64,2},1}(ntasks)
+    edge_ranks = Array{Array{Float64,2},1}(ntasks)
+    edge_signs = Array{Array{Float64,2},1}(ntasks)
     for task = 1:ntasks
-        networks[task] = zeros(ngenes, npreds)
+        edge_confs[task] = zeros(ngenes, npreds)
+        edge_ranks[task] = zeros(ngenes, npreds)
+        edge_signs[task] = zeros(ngenes, npreds)
     end
     for genei = 1:ngenes
-        ~,Ys = preprocess_data(Xs, YSs[genei], score_X = false, score_Y = true)
-        Cs,~ = covariance_update_terms(Xs, Ys, calcDs = false, calcCs = true)
-        W,B,S = dirty_multitask_lasso(Xs, Ys;
+        sampleYs = Array{Array{Float64,1},1}(ntasks)
+        for task = 1:ntasks
+            sampleYs[task] = YSs[genei][task][samples[task],:]
+        end
+        ~,currYs = preprocess_data(currXs, sampleYs, score_X = false, score_Y = true)
+        Cs,~ = covariance_update_terms(currXs, currYs, calcDs = false, calcCs = true)
+        W,B,S = dirty_multitask_lasso(currXs, currYs;
             P = prior, lamB = lamB, lamS = lamS,
             Cs = Cs, Ds = Ds, ntasks = ntasks, npreds = npreds)
         for task = 1:ntasks
-            networks[task][genei,:] = W[:,task]
+            currBeta = W[:,task]
+            nzeroPreds = find(currBeta)
+            currNzeroXs = preprocess_data(currXs[task][:,nzeroPreds], score_Y = false)
+            rescaledBeta = llsq(currNzeroXs, currYs, bias = false)
+            varResidAll = var(currNzeroXs*rescaledBeta - currYs)
+            gene_edge_confs = Array{Float64,1}(npreds)
+            for nzeroPred = 1:length(nzeroPreds)
+                ogIndex = nzeroPreds[nzeroPred]
+                noPredBeta = deepcopy(rescaledBeta)
+                noPredBeta[nzeroPred] = 0
+                varResidPred = var(currNzeroXs*noPredBeta - currYs)
+                gene_edge_confs[ogIndex] = 1-(varResidAll/varResidPred)
+            end
+            edge_confs[task][genei,:] = gene_edge_confs
+            gene_edge_ranks = tiedrank(gene_edge_confs,rev = true)
+            edge_ranks[task][genei,:] = gene_edge_ranks
+            currEdgeSigns = zeros(npreds)
+            currEdgeSigns[nzeroPreds] = sign.(rescaledBeta)
+            edge_signs[task][genei,:] = currEdgeSigns
         end
     end
-    return networks
+    return edge_confs, edge_ranks, edge_signs
 end
-
-function buildTRNs(Xs::Array{Array{Float64,2},1},
-    YSs::Array{Array{Array{Float64,1},1},1}, lamS, lamB; nboots = 50)
-    """Rank TF-gene interactions according to confidence:
-    1 - var(residuals_i)/var(residual[~TF])."""
-end
-
-
 
 function test_fit()
     Xs,YSs,true_nets =  simulate_data(2, 50, [50,50],15,2)
@@ -543,7 +579,62 @@ function get_partitions(data::Array{Float64,1}, nsamps::Array{Int64,1})
     return(partitionedData)
 end
 
-function MTL()
+function buildTRNs(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Array{Float64,1},1},1},
+    lamS::Float64, lamB::Float64, nsamps::Array{Int64,1}, nboots::Int64, ntasks::Int64; prior = nothing)
+    """Rank TF-gene interactions according to confidence:
+        1 - var(residuals_i)/var(residuals[~TF]).
+    Use rankings to return a transcritptional regulatory network."""
+    confs = Array{Array{Array{Float64,2},1},1}(ntasks)
+    ranks = Array{Array{Array{Float64,2},1},1}(ntasks)
+    signs = Array{Array{Array{Float64,2},1},1}(ntasks)
+    for task = 1:ntasks
+        confs[task] = Array{Array{Float64,2},1}(nboots)
+        ranks[task] = Array{Array{Float64,2},1}(nboots)
+        signs[task] = Array{Array{Float64,2},1}(nboots)
+    end
+    println("Getting bootstrap confidences")
+    @showprogress for boot = 1:nboots
+        bootstrap_samps = Array{Array{Float64,1},1}(ntasks)
+        for task = 1:ntasks
+            taskSamps = nsamps[task]
+            bootstrap_samps[task] = sample(1:taskSamps,taskSamps)
+        end
+        currConfs, currRanks, currSigns = GetBestNets(Xs, YSs, lamS, lamB, prior = prior,
+        samples = bootstrap_samps, ntasks = ntasks)
+        for task = 1:ntasks
+            confs[task][boot] = currConfs[task]
+            ranks[task][boot] = currRanks[task]
+            signs[task][boot] = currSigns[task]
+        end
+    end
+    confsNet = Array{Array{Float64,2},1}(ntasks)
+    ranksNet = Array{Array{Float64,2},1}(ntasks)
+    signNet = Array{Array{Float64,2},1}(ntasks)
+    plots = Array{Plots.Plot{Plots.PyPlotBackend},1}(ntasks)
+    for task = 1:ntasks
+        currMeanConfs = mean(confs[task])
+        currMeanRanks = mean(ranks[task])
+        currMeanSigns = mean(signs[task])
+        TFsPerGene = sum(sign(currMeanConfs),1)
+        plots[task] = histogram(TFsPerGene, label = "Task: "*task,
+            xlabel = "TFs/Gene", ylabel = "count")
+        confsNet[task] = currMeanConfs
+        ranksNet[task] = currMeanRanks
+        signNet[task] = currMeanSigns
+    end
+    p::Plots.Plot = plot(plots[:]..., layout = ntasks)
+    display(p)
+    TRNOut = "TRNs"
+    savefig(TRNOut * ".pdf")
+    matwrite(TRNOut * ".mat", Dict(
+            "Confs" => confsNet,
+            "Ranks" => ranksNet,
+            "Signs" => signNet
+    ))
+    return(confsNet, ranksNet, signNet)
+end
+
+function MTL(nboots = 50)
     """MAIN: fit TRNs for multiple tasks using multitask learning"""
     TaskMatPaths = ["./fitSetup/RNAseq_ATAC_Th17_bias50.mat",
         "./fitSetup/scRNAseq_ATAC_Th17_bias50.mat"]
@@ -569,14 +660,18 @@ function MTL()
         else
             tempYSs = [tempYSs;inputs["responseMat"]']
         end
-
     end
-
     println("Getting gene responses")
     YSs = Array{Array{Array{Float64,1},1}}(ngenes)
     @showprogress for gene = 1:ngenes
         YSs[gene] = get_partitions(tempYSs[:,gene],nsamps)
     end
-    lams =  fit_network(Xs, YSs::Array{Array{Array{Float64,1},1},1}, Smin = 0.05,
+    Xs, YSs, lams =  fit_network(Xs, YSs, Smin = 0.05,
     Smax = 1, Ssteps = 10, nB = 4, prior = prior, fit = :ebic)
+    # Given our optimal lambdas, bootstrap to rank edges
+    lamS = lams[1];lamB = lams[2]
+    confsNet, ranksNet, signNet = buildTRNs(Xs, YSs, lamS, lamB, nsamps,
+        nboots, ntasks, prior = prior)
+    buildOutputs(confsNet, ranksNet, signNet, taskMTLinputs[1]["targGenes"],
+        taskMTLinputs[2]["allPredictors"])
 end
