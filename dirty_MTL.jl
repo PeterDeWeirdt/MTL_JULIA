@@ -5,7 +5,7 @@
 #Pkg.add("StatPlots")
 #Pkg.add("MAT")
 #Pkg.add("OhMyREPL")
-Pkg.add("MultivariateStats")
+#Pkg.add("MultivariateStats")
 using OhMyREPL
 using StatsBase
 using Plots
@@ -16,21 +16,21 @@ using IterTools
 using MultivariateStats
 pyplot()
 
-function preprocess_data(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1};
-    score_X = true, score_Y = true)
+function preprocess_data(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1})
     """z-score data"""
     ntasks = length(Xs)
     for k in 1:ntasks
         X = Xs[k]
-        Y = Ys[k]
-        if score_X
-            Xs[k] = zscore(X, mean(X,1), std(X, 1, corrected = false))
-        end
-        if score_Y
-            Ys[k] = zscore(Y, mean(Y,1), std(Y,1, corrected = false))
-        end
+        Ys = YSs[k]
+        scoredX = zscore(X, mean(X,1), std(X, 1, corrected = true))
+        scoredYs = zscore(Ys, mean(Ys,1), std(Ys,1, corrected = true))
+        #If our data does not vary, set NaN's to 0. May want to set a warning for this later
+        scoredX[isnan.(scoredX)] = 0
+        scoredYs[isnan.(scoredYs)] = 0
+        Xs[k] = scoredX
+        YSs[k] = scoredYs
     end
-    return Xs, Ys
+    return Xs, YSs
 end
 
 function covariance_update_terms(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1};
@@ -43,12 +43,16 @@ function covariance_update_terms(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{
     ntasks = length(Xs)
     Cs = Array{Array{Float64,1},1}(ntasks)
     Ds = Array{Array{Float64,2},1}(ntasks)
-    # Devctorized for speed
     for k in 1:ntasks
-        X = Xs[k]
-        Y = Ys[k]
-        if calcCs;Cs[k] = X'*Y;end
-        if calcDs;Ds[k] = X'*X;end
+        if calcCs
+            Y = Ys[k]
+            X = Xs[k]
+            Cs[k] = X'*Y
+        end
+        if calcDs
+            X = Xs[k]
+            Ds[k] = X'*X
+        end
     end
     return Cs, Ds
 end
@@ -59,7 +63,7 @@ function updateS(Cs::Array{Array{Float64,1},1}, Ds::Array{Array{Float64,2},1},
     lasso regularized -- using cyclical coordinate descent and
     soft-thresholding"""
     ntasks = length(Cs)
-    npreds = size(P, 1)
+    npreds = size(P,1)
     for k = 1:ntasks
         c = Cs[k]; D = Ds[k]
         b = B[:,k]; s = S[:,k]
@@ -151,7 +155,7 @@ end
 function dirty_multitask_lasso(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1};
     P = nothing , lamB = 0., lamS = 0.,
     Cs = nothing, Ds = nothing, S = nothing, B = nothing, maxiter = 1000,
-    tolerance = 1e-7, score = false, ntasks = nothing, npreds = nothing)
+    tolerance = 1e-4, score = false, ntasks = nothing, npreds = nothing)
     """Fits regression model in which the weights matrix W (predictors x tasks)
     is decomposed in two components: B that captures block structure across tasks
     and S that allows for the differences.
@@ -161,7 +165,9 @@ function dirty_multitask_lasso(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Fl
     if score
         Xs, Ys = preprocess_data(Xs, Ys)
     end
-    if P == nothing; P = ones(npreds, ntasks);end
+    if P == nothing
+        P = ones(npreds, ntasks)
+    end
     if Cs == nothing || Ds == nothing
         Cs, Ds = covariance_update_terms(Xs, Ys)
     end
@@ -192,67 +198,13 @@ function dirty_multitask_lasso(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Fl
             break
         end
         if i == maxiter
-            println(maximum(abs.(W-W_old)))
-            println("Maxed")
-            println(tolerance)
-            println(W)
-            println(W_old)
+            println("Maxed out on iterations for one fit, maximum parameter difference wass: "*string(maximum(abs.(W-W_old))))
         end
     end
     SOut[original_indices,:] = S
     BOut[original_indices,:] = B
     return(W, BOut, SOut)
  end
-
-
-function test_MTL(ntasks::Int64, npreds::Int64, nsamps::Array{Int64, 1},
-    n_nonzero::Int64; lamB = 0., lamS = 0., tolerance = nothing, maxiter = 1000)
-    Xs = Array{Array{Float64,2},1}(ntasks)
-    Ys = Array{Array{Float64,1},1}(ntasks)
-    Ws = zeros(npreds, ntasks)
-    srand(1)
-    for i = 1:ntasks
-        X = rand(nsamps[i],npreds)
-        W = zeros(npreds)
-        W[sample(1:npreds, n_nonzero, replace = false)] = 1
-        Ws[:,i] = W
-        Y = X*W
-        Xs[i] = X;Ys[i] = Y
-    end
-    t = @elapsed W_inf,S,B = dirty_multitask_lasso(Xs, Ys, lamB = lamB, lamS = lamS,
-    tolerance = tolerance, maxiter = maxiter)
-    println(sum(Ws - abs.(sign.(W_inf))))
-    return(t)
-end
-
-function get_times(tasks, preds, samps, d_task, d_pred, d_samp;
-    nzero = 15, lamB = 0.02, lamS = 0.01, maxiter = 1000, tolerance = nothing)
-    task_time = zeros(length(tasks))
-    for i = 1:length(tasks)
-        ntask = tasks[i]
-        d_samps = repmat([d_samp], ntask)
-        task_time[i] = test_MTL(ntask, d_pred, d_samps, nzero, lamB = lamB, lamS = lamS, maxiter = maxiter, tolerance = tolerance)
-    end
-    plot(tasks,task_time, marker = (2,:circle), line = :dot, xlabel = "Tasks", ylabel = "Time (seconds)")
-    png("tasks")
-
-    d_samps = repmat([d_samp], d_task)
-    pred_time = zeros(length(preds))
-    for i = 1:length(preds)
-        pred = preds[i]
-        pred_time[i] = test_MTL(d_task, pred, d_samps, nzero, lamB = lamB, lamS = lamS, tolerance = tolerance)
-    end
-    plot(preds,pred_time, m = (2,:circle), line = :dot, xlabel = "Predictors", ylabel = "Time (seconds)")
-    png("preds")
-
-    samp_time = zeros(length(samps))
-    for i = 1:length(samps)
-        samp = repmat([samps[i]], d_task)
-        samp_time[i] = test_MTL(d_task, d_pred, samp, nzero, lamB = lamB, lamS = lamS, tolerance = tolerance)
-    end
-    plot(samps,samp_time, m = (2, :circle), line = :dot, xlabel = "Samples", ylabel = "Time (seconds)")
-    png("samps")
-end
 
 function get_RSS(X, Y, W)
     return(sum((Y - X*W).^2))
@@ -265,13 +217,14 @@ end
 
 function ebic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
     W::Array{Float64,2}, n_tasks::Int64, n_samples::Array{Int64,1}, n_preds::Int64;
-    gamma = 1)
+    gamma = 1, lamS = 0.)
     """Calculate EBIC for each task and take the mean"""
     EBIC = Array{Float64,1}(n_tasks)
     for k in 1:n_tasks
         samps = n_samples[k]
-        tot_preds = length(W[:,k])
-        nonzero_pred = sum(Int,abs.(sign.(W[:,k])))
+        currW = W[:,k]
+        tot_preds = length(currW)
+        nonzero_pred = sum(Int,sum(abs.(currW) .> lamS))
         RSS = get_RSS(Xs[k],Ys[k],W[:,k])
         BIC_penalty = nonzero_pred*log(samps)
         if nonzero_pred == 0 || nonzero_pred == tot_preds
@@ -280,8 +233,6 @@ function ebic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
             EBIC_penalty = 2*gamma*(approxLnNFact(tot_preds) -
             (approxLnNFact(nonzero_pred) + approxLnNFact((tot_preds - nonzero_pred))))
         end
-        # println("\tTask: ", k, " Nonzero: ", sum(abs.(sign.(W))), "\n\tRSS: ", RSS, " RSS_pen: ", samps*log(RSS/samps),
-        # "\n\tBIC: ", BIC_penalty, " EBIC: ", EBIC_penalty)
         EBIC[k] = (samps*log(RSS/samps) + BIC_penalty + EBIC_penalty)
     end
     return(mean(EBIC))
@@ -297,15 +248,18 @@ function kfoldperm(N::Int64,k::Int64)
     return [p[r] for r in [b[i]:b[i+1]-1 for i=1:k]]
 end
 
-function fit_gene(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
-    Ds::Array{Array{Float64,2},1},ntasks::Int64, npreds::Int64,
-    nsamps::Array{Int64,1}, lamSs::Array{Float64,1};nB = 3,
-    prior = nothing, fit = :ebic, nfolds = 5)
-    """For one gene, calculate fit for each pair of lamS, lamB
-    fit options -- :ebic and :cv
+function fit_gene_cv(foldInXs::Array{Array{Array{Float64,2},1},1},
+    foldInYs::Array{Array{Array{Float64,1},1},1}, foldLOXs::Array{Array{Array{Float64,2},1},1},
+    foldLOYs::Array{Array{Array{Float64,1},1},1}, foldDs::Array{Array{Array{Float64,2},1},1},
+    ntasks::Int64, npreds::Int64,nsamps::Array{Int64,1}, lamSs::Array{Float64,1};
+    nB = 3, prior = nothing)
+    """For one gene, calculate fit for each pair of lamS, lamB using cross validation
     Note: sliding window for lambdaB"""
-    if fit == :ebic
-        Cs,~ = covariance_update_terms(Xs, Ys, calcDs = false, calcCs = true)
+    nfolds = length(foldInYs)
+    foldCs = Array{Array{Array{Float64,1},1},1}(nfolds)
+    for fold = 1:nfolds
+        foldCs[fold],~ = covariance_update_terms(foldInXs[fold], foldInYs[fold],
+            calcDs = false, calcCs = true)
     end
     nS = length(lamSs)
     lambdas = Array{Float64, 2}(nS*nB, 2)
@@ -321,47 +275,60 @@ function fit_gene(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
         S = outerS
         B = outerB
         for Bi = 1:nB
-            println(lambdasi)
             lamB = lamBs[(nB + 1) - Bi]
-            if fit == :ebic
-                W,B,S = dirty_multitask_lasso(Xs, Ys;
+            foldErrors = Array{Float64, 1}(nfolds)
+            for fold = 1:nfolds
+                W,B,S = dirty_multitask_lasso(foldInXs[fold], foldInYs[fold];
                     P = prior, lamB = lamB, lamS = lamS,
-                    Cs = Cs, Ds = Ds, S = S, B = B, ntasks = ntasks, npreds = npreds)
+                    S = S, B = B, ntasks = ntasks, npreds = npreds)
+                sq_err = 0
+                for k = 1:ntasks
+                    sq_err += get_RSS(foldLOXs[fold][k],foldLOYs[fold][k],W[:,k])
+                end
+                foldErrors[fold] = sq_err
+            end
+            currFit = mean(foldErrors)
+            if Bi == 1
+                outerS = S
+                outerB = B
+            end
+            Fits[lambdasi] = currFit
+            lambdas[lambdasi,:] = [lamS,lamB]
+            lambdasi += 1
+        end
+    end
+    return(Fits, lambdas)
+end
+
+function fit_gene_ebic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
+    Ds::Array{Array{Float64,2},1}, ntasks::Int64, npreds::Int64,nsamps::Array{Int64,1},
+    lamSs::Array{Float64,1}, fit::Symbol; nB = 3, prior = nothing)
+    """For one gene, calculate fit for each pair of lamS, lamB
+    fit options
+    Note: sliding window for lambdaB"""
+    Cs,~ = covariance_update_terms(Xs, Ys, calcDs = false, calcCs = true)
+    nS = length(lamSs)
+    lambdas = Array{Float64, 2}(nS*nB, 2)
+    Fits = Array{Float64, 1}(nS*nB)
+    #Use a warm start
+    lambdasi = 1
+    outerS = nothing
+    outerB = nothing
+    for Si = 1:nS
+        lamS = lamSs[(nS+1) - Si]
+        #Note: lamS <= lamB <= ntasks*lamS
+        lamBs = logspace(log10(lamS), log10(2*lamS), nB)
+        S = outerS
+        B = outerB
+        for Bi = 1:nB
+            lamB = lamBs[(nB + 1) - Bi]
+            W,B,S = dirty_multitask_lasso(Xs, Ys;
+                P = prior, lamB = lamB, lamS = lamS,
+                Cs = Cs, Ds = Ds, S = S, B = B, ntasks = ntasks, npreds = npreds)
+            if fit == :ebic
                 currFit = ebic(Xs, Ys, W, ntasks, nsamps, npreds)
-            elseif fit == :cv
-                folds = Array{Array{Array{Int64,1},1},1}(ntasks)
-                for task = 1:ntasks
-                    folds[task] = kfoldperm(nsamps[task], nfolds)
-                end
-                foldErrors = Array{Float64, 1}(nfolds)
-                for fold = 1:nfolds
-                    LOXs = Array{Array{Float64,2},1}(ntasks)
-                    LOYs = Array{Array{Float64,1},1}(ntasks)
-                    InXs = Array{Array{Float64,2},1}(ntasks)
-                    InYs = Array{Array{Float64,1},1}(ntasks)
-                    for task = 1:ntasks
-                        currFold = folds[task][fold]
-                        LOXs[task] = Xs[task][currFold,:]
-                        LOYs[task] = Ys[task][currFold]
-                        keepInds = (1:nsamps[task])[filter((x) -> !(x in currFold),1:nsamps[task])]
-                        InXs[task] = Xs[task][keepInds,:]
-                        InYs[task] = Ys[task][keepInds]
-                    end
-                    W,B,S = dirty_multitask_lasso(InXs, InYs;
-                        P = prior, lamB = lamB, lamS = lamS,
-                        S = S, B = B, ntasks = ntasks, npreds = npreds)
-                    sq_err = 0
-                    for k = 1:ntasks
-                        sq_err += get_RSS(LOXs[k],LOYs[k],W[:,k])
-                        if sq_err < 0
-                            println(get_RSS(LOXs[k],LOYs[k],W[:,k]))
-                        end
-                    end
-                    foldErrors[fold] = sq_err
-                end
-                currFit = mean(foldErrors)
             else
-                println("Fit method not supported")
+                currFit = ebic(Xs, Ys, W, ntasks, nsamps, npreds, lamS = lamS)
             end
             if Bi == 1
                 outerS = S
@@ -386,31 +353,100 @@ function within1seMin(data::Array{Float64,1})
 end
 
 function fit_network(Xs::Array{Array{Float64,2},1},
-    YSs::Array{Array{Array{Float64,1},1},1}; Smin = 0.01, Smax = 1,
-    Ssteps = 10, nB = 4, prior = nothing, fit = :ebic)
+    YSs::Array{Array{Float64,2},1}; Smin = 0.01, Smax = 1,
+    Ssteps = 10, nB = 4, priors = nothing, fit = :ebic, npreds = nothing,
+    nsamps = nothing, ngenes = nothing, nfolds = 5)
     """Calculate fit for each gene in a network. Plot grid of median fits.
     Return lambdaS and lambdaB within 1 se of the minimum fit."""
     ntasks = length(Xs)
-    Xs,~ = preprocess_data(Xs, YSs[1], score_X = true, score_Y = false)
-    ~,Ds = covariance_update_terms(Xs, YSs[1], calcCs = false, calcDs = true)
-    npreds = size(Xs[1], 2)
-    nsamps = Array{Int64, 1}(ntasks)
-    for task = 1:ntasks
-        nsamps[task] = size(Xs[task], 1)
+    if npreds==nothing;npreds = size(Xs[1], 2);end
+    if nsamps==nothing
+        nsamps = Array{Int64, 1}(ntasks)
+        for task = 1:ntasks
+            nsamps[task] = size(Xs[task], 1)
+        end
     end
-    ngenes = length(YSs)
+    if ngenes==nothing;ngenes = size(YSs[1],2);end
     lamSlog10step = 1/Ssteps
     logLamSRange = log10(Smin):lamSlog10step:log10(Smax)
     lamSs = 10.^logLamSRange
     geneFits = Array{Float64,2}(length(lamSs)*nB,ngenes)
     lambdas = Array{Float64,2}(length(lamSs)*nB,2)
+    if fit == :ebic || fit == :modEbic
+        Xs,YSs = preprocess_data(Xs, YSs)
+        ~,Ds = covariance_update_terms(Xs, Array{Array{Float64,1},1}(0), calcCs = false, calcDs = true)
+    elseif fit == :cv
+        folds = Array{Array{Array{Int64,1},1},1}(ntasks)
+        for task = 1:ntasks
+            folds[task] = kfoldperm(nsamps[task], nfolds)
+        end
+        foldLOXs = Array{Array{Array{Float64,2},1},1}(nfolds)
+        foldInXs = Array{Array{Array{Float64,2},1},1}(nfolds)
+        foldLOYSs = Array{Array{Array{Float64,2},1},1}(nfolds)
+        foldInYSs = Array{Array{Array{Float64,2},1},1}(nfolds)
+        foldDs = Array{Array{Array{Float64,2},1},1}(nfolds)
+        for fold = 1:nfolds
+            LOXs = Array{Array{Float64,2},1}(ntasks)
+            LOYSs = Array{Array{Float64,2},1}(ntasks)
+            InXs = Array{Array{Float64,2},1}(ntasks)
+            InYSs = Array{Array{Float64,2},1}(ntasks)
+            for task = 1:ntasks
+                currFold = folds[task][fold]
+                LOXs[task] = Xs[task][currFold,:]
+                LOYSs[task] = YSs[task][currFold,:]
+                keepInds = (1:nsamps[task])[filter((x) -> !(x in currFold),1:nsamps[task])]
+                InXs[task] = Xs[task][keepInds,:]
+                InYSs[task] = YSs[task][keepInds,:]
+            end
+            b4LOXs = deepcopy(LOXs)
+            LOXs, LOYSs = preprocess_data(LOXs, LOYSs)
+            InXs, InYSs = preprocess_data(InXs, InYSs)
+            foldLOXs[fold] = LOXs
+            foldInXs[fold] = InXs
+            foldLOYSs[fold] = LOYSs
+            foldInYSs[fold] = InYSs
+            ~,foldDs[fold] = covariance_update_terms(InXs, Array{Array{Float64,1},1}(0), calcCs = false, calcDs = true)
+        end
+    end
     println("Estimating fits for " * string(ngenes) * " genes")
     @showprogress for genei = 1:ngenes
-        println(genei)
-        ~,Ys = preprocess_data(Xs, YSs[genei], score_X = false, score_Y = true)
-        YSs[genei] = Ys
-        Fits, lambdas = fit_gene(Xs, Ys, Ds,ntasks, npreds, nsamps, lamSs,
-        nB = nB, prior = prior, fit = fit)
+        if fit == :ebic || fit == :modEbic
+            Ys = Array{Array{Float64,1},1}(ntasks)
+            P = Array{Float64,2}(npreds, ntasks)
+            for k = 1:ntasks
+                Ys[k] = YSs[k][:,genei]
+                if priors != nothing
+                    P[:,k] = priors[k][:,genei]
+                else
+                    P[:,k] = ones(npreds)
+                end
+            end
+            Fits, lambdas = fit_gene_ebic(Xs, Ys, Ds,
+            ntasks, npreds, nsamps, lamSs, fit, nB = nB, prior = P)
+        elseif fit == :cv
+            P = Array{Float64,2}(npreds, ntasks)
+            for k = 1:ntasks
+                if priors != nothing
+                    P[:,k] = priors[k][:,genei]
+                else
+                    P[:,k] = ones(npreds)
+                end
+            end
+            foldInYs = Array{Array{Array{Float64,1},1},1}(nfolds)
+            foldLOYs = Array{Array{Array{Float64,1},1},1}(nfolds)
+            for fold = 1:nfolds
+                InYs = Array{Array{Float64,1},1}(ntasks)
+                LOYs = Array{Array{Float64,1},1}(ntasks)
+                for task = 1:ntasks
+                    InYs[task] =  foldInYSs[fold][task][:,genei]
+                    LOYs[task] =  foldLOYSs[fold][task][:,genei]
+                end
+                foldInYs[fold] = InYs
+                foldLOYs[fold] = LOYs
+            end
+            Fits, lambdas = fit_gene_cv(foldInXs,foldInYs,foldLOXs, foldLOYs,
+            foldDs, ntasks, npreds, nsamps, lamSs,nB = nB, prior = P)
+        end
         geneFits[:,genei] = Fits
     end
     networkFits = median(geneFits,2)
@@ -421,10 +457,11 @@ function fit_network(Xs::Array{Array{Float64,2},1},
     chosenInd = within1seMin(sortedFits)
     chosenLams = sorted_lambda[chosenInd,:]
     minInd = indmin(networkFits)
-    p::Plots.Plot = plot(lambdas[:,1],lambdas[:,2], seriestype=:scatter,marker_z = networkFits,
-    xlabel = "lambda S", ylabel = "lambda B", label = "", colorbar_title = "Fit",
-    xscale = :log10, yscale = :log10, xlims = (10^(log10(minimum(lambdas[:,1]))-0.1),
-    10^(log10(maximum(lambdas[:,1]))+0.1)),
+    p::Plots.Plot = plot(lambdas[:,1],lambdas[:,2], seriestype=:scatter,
+    marker_z = networkFits, markershape = :rect, markersize = 6,
+    seriescolor = :Spectral, xlabel = "lambda S", ylabel = "lambda B",
+    label = "", colorbar_title = "Fit", xscale = :log10, yscale = :log10,
+    xlims = (10^(log10(minimum(lambdas[:,1]))-0.1), 10^(log10(maximum(lambdas[:,1]))+0.1)),
     ylims = (10^(log10(minimum(lambdas[:,2]))-0.1), 10^(log10(maximum(lambdas[:,2]))+0.1)),
     annotations = [(chosenLams[1], chosenLams[2], text("o", :darkorange)),
     (lambdas[minInd,1], lambdas[minInd,2], text("x", :violet))])
@@ -439,57 +476,16 @@ function fit_network(Xs::Array{Array{Float64,2},1},
     return Xs, YSs, chosenLams
 end
 
-function simulate_data(ntasks::Int64, npreds::Int64, nsamps::Array{Int64, 1},
-    n_nonzero::Int64, ngenes::Int64)
-    Xs = Array{Array{Float64,2},1}(ntasks)
-    YSs = Array{Array{Array{Float64,1},1}}(ngenes)
-    networks = Array{Array{Float64,2},1}(ntasks)
-    for i = 1:ntasks
-        X = rand(nsamps[i],npreds)
-        Xs[i] = X;
-        networks[i] = zeros(ngenes, npreds)
-    end
-    for gene = 1:ngenes
-        Ys = Array{Array{Float64,1},1}(ntasks)
-        Ws = zeros(npreds, ntasks)
-        coreWs = sample(1:npreds, n_nonzero, replace = false)
-        for task = 1:ntasks
-            BWs = sample(coreWs, floor(Int64, n_nonzero/2), replace = false)
-            SWs = sample(1:npreds, n_nonzero - floor(Int64, n_nonzero/2), replace = false)
-            W = zeros(npreds)
-            W[union(BWs, SWs)] = 1
-            networks[task][gene,:] = W
-            Ws[:,task] = W
-            Y = Xs[task]*W + 0.1*rand(nsamps)
-            Ys[task] = Y
-        end
-        YSs[gene] = Ys
-    end
-    return(Xs, YSs, networks)
-end
-
-function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Array{Float64,1},1}},
-    lamS::Float64, lamB::Float64; prior = nothing, samples = nothing, ntasks = nothing)
+function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1},
+    lamS::Float64, lamB::Float64; priors = nothing, ntasks = nothing, npreds = nothing,
+    ngenes = nothing)
     """ Given an optimal lamS and lamB return a matrix of confidences for edge
     interactions, and the sign of those interactions. Current options for methods
     are confidences and ranks"""
     if ntasks == nothing;ntasks = length(Xs);end
-    if samples == nothing
-        samples = Array{Array{Float64,1},1}(ntasks)
-        for task = 1:ntasks
-            currSamps = size(Xs[task],1)
-            samples[task] = currSamps
-        end
-    end
-    sampleYSs = deepcopy(YSs)
-    sampleXs = Array{Array{Float64,2},1}(ntasks)
-    for task = 1:ntasks
-        sampleXs[task] =  Xs[task][samples[task],:]
-    end
-    currXs,~ = preprocess_data(sampleXs, YSs[1], score_X = true, score_Y = false)
-    ~,Ds = covariance_update_terms(currXs, YSs[1], calcCs = false, calcDs = true)
-    npreds = size(Xs[1], 2)
-    ngenes = length(YSs)
+    ~,Ds = covariance_update_terms(Xs, Array{Array{Float64,1},1}(0), calcCs = false, calcDs = true)
+    if npreds == nothing;npreds = size(Xs[1], 2);end
+    if ngenes == nothing;ngenes = length(YSs);end
     edge_confs = Array{Array{Float64,2},1}(ntasks)
     edge_ranks = Array{Array{Float64,2},1}(ntasks)
     edge_signs = Array{Array{Float64,2},1}(ntasks)
@@ -499,14 +495,19 @@ function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Array{Float
         edge_signs[task] = zeros(ngenes, npreds)
     end
     for genei = 1:ngenes
-        sampleYs = Array{Array{Float64,1},1}(ntasks)
-        for task = 1:ntasks
-            sampleYs[task] = YSs[genei][task][samples[task],:]
+        Ys = Array{Array{Float64,1},1}(ntasks)
+        P = Array{Float64,2}(npreds, ntasks)
+        for k = 1:ntasks
+            Ys[k] = YSs[k][:,genei]
+            if priors != nothing
+                P[:,k] = priors[k][:,genei]
+            else
+                P[:,k] = ones(npreds)
+            end
         end
-        ~,currYs = preprocess_data(currXs, sampleYs, score_X = false, score_Y = true)
-        Cs,~ = covariance_update_terms(currXs, currYs, calcDs = false, calcCs = true)
-        W,B,S = dirty_multitask_lasso(currXs, currYs;
-            P = prior, lamB = lamB, lamS = lamS,
+        Cs,~ = covariance_update_terms(Xs, Ys, calcDs = false, calcCs = true)
+        W,B,S = dirty_multitask_lasso(Xs, Ys;
+            P = P, lamB = lamB, lamS = lamS,
             Cs = Cs, Ds = Ds, ntasks = ntasks, npreds = npreds)
         for task = 1:ntasks
             currBeta = W[:,task]
@@ -533,42 +534,6 @@ function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Array{Float
     return edge_confs, edge_ranks, edge_signs
 end
 
-function test_fit()
-    Xs,YSs,true_nets =  simulate_data(2, 50, [50,50],15,2)
-    lambdas = fit_network(Xs, YSs, fit = :ebic)
-    optLamS = lambdas[1]
-    optLamB = lambdas[2]
-    optimal_nets = GetBestNets(Xs, YSs, optLamS, optLamB)
-    hamming_dist = Array{Int64,1}(length(optimal_nets))
-    for i = 1:length(optimal_nets)
-        println(optimal_nets[i])
-        println(true_nets[i])
-        hamming_dist[i] = sum(abs.(abs.(sign.(true_nets[i])) - abs.(sign.(optimal_nets[i]))))
-    end
-    return hamming_dist
-end
-
-function time_one_gene(ntrials)
-    ts = Array{Float64, 1}(ntrials)
-    hammings = Array{Float64, 1}(ntrials)
-    @showprogress 1 for i = 1:ntrials
-        Xs,YSs,true_nets =  simulate_data(2, 300, [5000,250],15,1)
-        ts[i] = @elapsed optimal_nets = GetBestNets(Xs, YSs, 0.01, 0.02)
-        hamming_dist = Array{Int64,1}(length(optimal_nets))
-        for j = 1:length(optimal_nets)
-            hamming_dist[j] = sum(abs.(abs.(sign.(true_nets[j])) - abs.(sign.(optimal_nets[j]))))
-        end
-        hammings[i] = mean(hamming_dist)
-    end
-    tPlot = boxplot(ts, label = "", ylabel = "time (seconds)", markeralpha = 0.6)
-    hPlot = boxplot(hammings, label = "", ylabel = "hamming dist.", markeralpha = 0.6)
-    png(tPlot, "oneGeneSimTimes")
-    png(hPlot, "oneGeneSimHamming")
-    display(tPlot)
-    display(hPlot)
-    return ts, hammings
-end
-
 function get_partitions(data::Array{Float64,1}, nsamps::Array{Int64,1})
     #Assume length(data) %% nparts = 0
     nparts = length(nsamps)
@@ -579,11 +544,18 @@ function get_partitions(data::Array{Float64,1}, nsamps::Array{Int64,1})
     return(partitionedData)
 end
 
-function buildTRNs(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Array{Float64,1},1},1},
-    lamS::Float64, lamB::Float64, nsamps::Array{Int64,1}, nboots::Int64, ntasks::Int64; prior = nothing)
+function buildTRNs(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1};
+    Smin = 0.05, Smax = 1, Ssteps = 10, nB = 4, nboots = 1, priors = nothing,
+    fit = :ebic, nsamps = nothing, ntasks = nothing)
     """Rank TF-gene interactions according to confidence:
         1 - var(residuals_i)/var(residuals[~TF]).
     Use rankings to return a transcritptional regulatory network."""
+    if ntasks == nothing;ntasks = lenght(Xs);end
+    if nsamps == nothing
+        for k = 1:ntasks
+            nsamps[k] = size(Xs[k],1)
+        end
+    end
     confs = Array{Array{Array{Float64,2},1},1}(ntasks)
     ranks = Array{Array{Array{Float64,2},1},1}(ntasks)
     signs = Array{Array{Array{Float64,2},1},1}(ntasks)
@@ -592,15 +564,23 @@ function buildTRNs(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Array{Float64
         ranks[task] = Array{Array{Float64,2},1}(nboots)
         signs[task] = Array{Array{Float64,2},1}(nboots)
     end
-    println("Getting bootstrap confidences")
-    @showprogress for boot = 1:nboots
-        bootstrap_samps = Array{Array{Float64,1},1}(ntasks)
-        for task = 1:ntasks
-            taskSamps = nsamps[task]
-            bootstrap_samps[task] = sample(1:taskSamps,taskSamps)
+    for boot = 1:nboots
+        println("Getting bootstrap confidences for "*string(boot)*" bootstraps")
+        sampleXs = deepcopy(Xs)
+        sampleYSs = deepcopy(YSs)
+        if nboots != 1
+            for task = 1:ntasks
+                currSamps = nsamps[task]
+                samples = sample(1:currSamps,currSamps)
+                sampleXs[task] =  Xs[task][samples,:]
+                sampleYSs[task] = YSs[task][samples,:]
+            end
         end
-        currConfs, currRanks, currSigns = GetBestNets(Xs, YSs, lamS, lamB, prior = prior,
-        samples = bootstrap_samps, ntasks = ntasks)
+        normXs, normYSs, lams =  fit_network(sampleXs, sampleYSs, Smin = Smin,
+        Smax = Smax, Ssteps = Ssteps, nB = nB, priors = priors, fit = fit)
+        lamS = lams[1]; lamB = lams[2]
+        currConfs, currRanks, currSigns = GetBestNets(normXs, normYSs,
+        lamS, lamB, priors = priors, ntasks = ntasks)
         for task = 1:ntasks
             confs[task][boot] = currConfs[task]
             ranks[task][boot] = currRanks[task]
@@ -634,44 +614,42 @@ function buildTRNs(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Array{Float64
     return(confsNet, ranksNet, signNet)
 end
 
-function MTL(nboots = 50)
+function buildOutputs(confsNet, ranksNet, signNet, targetGenes,
+    targetPredictors)
+    """Otuput a sparse tsv of network connections"""
+    return 0
+end
+
+function MTL(nboots = 1)
     """MAIN: fit TRNs for multiple tasks using multitask learning"""
-    TaskMatPaths = ["./fitSetup/RNAseq_ATAC_Th17_bias50.mat",
-        "./fitSetup/scRNAseq_ATAC_Th17_bias50.mat"]
+    TaskMatPaths = ["./fitSetup/RNAseqWmicro20genes_ATAC_Th17_bias50.mat",
+        "./fitSetup/microarrayWbulk20genes_ATAC_Th17_bias50.mat"]
     ntasks = length(TaskMatPaths)
     nsamps = Array{Int64}(ntasks)
     ngenes = Int64
     nTFs = Int64
     taskMTLinputs = Array{Dict{String,Any},1}(ntasks)
     Xs = Array{Array{Float64,2},1}(ntasks)
-    tempYSs = Array{Float64,2}(0,0)
-    prior = Array{Float64,2}(0,0)
+    YSs = Array{Array{Float64,2},1}(ntasks)
+    priors = Array{Array{Float64,2},1}(ntasks)
+    println("Reading in .mat data for MTL inference")
     @showprogress for task = 1:ntasks
         inputs = matread(TaskMatPaths[task])
         taskMTLinputs[task] = inputs
         Xs[task] = inputs["predictorMat"]'
         currSamps = size(Xs[task],1)
         nsamps[task] = currSamps
+        priors[task] = inputs["priorWeightsMat"]'
         if task == 1
-            prior = inputs["priorWeightsMat"]'
-            ngenes = size(prior,2)
-            nTFs = size(prior,1)
-            tempYSs = inputs["responseMat"]'
-        else
-            tempYSs = [tempYSs;inputs["responseMat"]']
+            ngenes = size(priors[1],2)
+            nTFs = size(priors[1],1)
         end
+        YSs[task] = inputs["responseMat"]'
     end
-    println("Getting gene responses")
-    YSs = Array{Array{Array{Float64,1},1}}(ngenes)
-    @showprogress for gene = 1:ngenes
-        YSs[gene] = get_partitions(tempYSs[:,gene],nsamps)
-    end
-    Xs, YSs, lams =  fit_network(Xs, YSs, Smin = 0.05,
-    Smax = 1, Ssteps = 10, nB = 4, prior = prior, fit = :ebic)
-    # Given our optimal lambdas, bootstrap to rank edges
-    lamS = lams[1];lamB = lams[2]
-    confsNet, ranksNet, signNet = buildTRNs(Xs, YSs, lamS, lamB, nsamps,
-        nboots, ntasks, prior = prior)
+    println("Buliding TRNs")
+    confsNet, ranksNet, signNet = buildTRNs(Xs, YSs,
+        Smin = 0.01, Smax = 1, Ssteps = 10, nB = 3, nboots = 1, priors = priors,
+        fit = :modEbic, nsamps = nsamps, ntasks = ntasks)
     buildOutputs(confsNet, ranksNet, signNet, taskMTLinputs[1]["targGenes"],
         taskMTLinputs[2]["allPredictors"])
 end
