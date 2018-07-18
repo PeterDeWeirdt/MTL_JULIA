@@ -155,8 +155,8 @@ end
 
 function dirty_multitask_lasso(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1};
     P = nothing , lamB = 0., lamS = 0.,
-    Cs = nothing, Ds = nothing, S = nothing, B = nothing, maxiter = 10000,
-    tolerance = 1e-7, score = false, ntasks = nothing, npreds = nothing)
+    Cs = nothing, Ds = nothing, S = nothing, B = nothing, maxiter = 1000,
+    tolerance = 1e-4, score = false, ntasks = nothing, npreds = nothing)
     """Fits regression model in which the weights matrix W (predictors x tasks)
     is decomposed in two components: B that captures block structure across tasks
     and S that allows for the differences.
@@ -470,7 +470,7 @@ function fit_network(Xs::Array{Array{Float64,2},1},
             "geneFits" => geneFits,
             "networkFits" => networkFits
     ))
-    return Xs, YSs, chosenLams
+    return chosenLams
 end
 
 function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1},
@@ -479,6 +479,7 @@ function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},
     """ Given an optimal lamS and lamB return a matrix of confidences for edge
     interactions, and the sign of those interactions. Current options for methods
     are confidences and ranks"""
+    Xs, YSs = preprocess_data(Xs, YSs)
     if ntasks == nothing;ntasks = length(Xs);end
     ~,Ds = covariance_update_terms(Xs, Array{Array{Float64,1},1}(0), calcCs = false, calcDs = true)
     if npreds == nothing;npreds = size(Xs[1], 2);end
@@ -510,6 +511,11 @@ function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},
             currBeta = W[:,task]
             currYs = Ys[task]
             nzeroPreds = find(currBeta)
+            nsamps = size(Xs[task],1)
+            if length(nzeroPreds) >  nsamps #Might want to print a warning for this too
+                sortedIndexes = sortperm(currBeta[nzeroPreds], rev = true)
+                nzeroPreds = nzeroPreds[sortedIndexes][1:(nsamps-1)]
+            end
             currNzeroXs = Xs[task][:,nzeroPreds]
             rescaledBeta = llsq(currNzeroXs, currYs, bias = false)
             varResidAll = var(currNzeroXs*rescaledBeta - currYs)
@@ -544,7 +550,7 @@ end
 
 function buildTRNs(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1};
     Smin = 0.05, Smax = 1, Ssteps = 10, nB = 4, nboots = 1, priors = nothing,
-    fit = :ebic, nsamps = nothing, ntasks = nothing)
+    fit = :ebic, nfolds = 2, nsamps = nothing, ntasks = nothing)
     """Rank TF-gene interactions according to confidence:
         1 - var(residuals_i)/var(residuals[~TF]).
     Use rankings to return a transcritptional regulatory network."""
@@ -574,10 +580,11 @@ function buildTRNs(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1}
                 sampleYSs[task] = YSs[task][samples,:]
             end
         end
-        normXs, normYSs, lams =  fit_network(sampleXs, sampleYSs, Smin = Smin,
-        Smax = Smax, Ssteps = Ssteps, nB = nB, priors = priors, fit = fit)
+        lams =  fit_network(sampleXs, sampleYSs, Smin = Smin,
+        Smax = Smax, Ssteps = Ssteps, nB = nB, priors = priors, fit = fit, nfolds = nfolds)
+        println(size(lams))
         lamS = lams[1]; lamB = lams[2]
-        currConfs, currRanks, currSigns = GetBestNets(normXs, normYSs,
+        currConfs, currRanks, currSigns = GetBestNets(Xs, YSs,
         lamS, lamB, priors = priors, ntasks = ntasks)
         for task = 1:ntasks
             confs[task][boot] = currConfs[task]
@@ -593,8 +600,8 @@ function buildTRNs(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1}
         currMeanConfs = mean(confs[task])
         currMeanRanks = mean(ranks[task])
         currMeanSigns = mean(signs[task])
-        TFsPerGene = sum(sign(currMeanConfs),1)
-        plots[task] = histogram(TFsPerGene, label = "Task: "*task,
+        TFsPerGene = sum(sign.(currMeanConfs),1)
+        plots[task] = histogram(TFsPerGene, label = "", title = "Task: "*string(task),
             xlabel = "TFs/Gene", ylabel = "count")
         confsNet[task] = currMeanConfs
         ranksNet[task] = currMeanRanks
@@ -602,7 +609,7 @@ function buildTRNs(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1}
     end
     p::Plots.Plot = plot(plots[:]..., layout = ntasks)
     display(p)
-    TRNOut = "TRNs"
+    TRNOut = "TRNs"*string(fit)
     savefig(TRNOut * ".pdf")
     matwrite(TRNOut * ".mat", Dict(
             "Confs" => confsNet,
@@ -772,6 +779,7 @@ function MTL(nboots = 1)
     """MAIN: fit TRNs for multiple tasks using multitask learning"""
     TaskMatPaths = ["./fitSetup/RNAseqWmicro20genes_ATAC_Th17_bias50.mat",
         "./fitSetup/microarrayWbulk20genes_ATAC_Th17_bias50.mat"]
+    gs = readdlm("micro_RNAseq_small_GS.txt",String)
     ntasks = length(TaskMatPaths)
     nsamps = Array{Int64}(ntasks)
     ngenes = Int64
@@ -794,17 +802,19 @@ function MTL(nboots = 1)
         end
         YSs[task] = inputs["responseMat"]'
     end
-    println("Buliding TRNs")
-    confsNet, ranksNet, signNet = buildTRNs(Xs, YSs,
-        Smin = 0.01, Smax = 1, Ssteps = 10, nB = 3, nboots = 1, priors = priors,
-        fit = :ebic, nsamps = nsamps, ntasks = ntasks)
     geneNames = convert(Array{String,1}, vec(Array(taskMTLinputs[1]["targGenes"])))
     TFNames = convert(Array{String,1}, vec(taskMTLinputs[1]["allPredictors"]))
-    buildOutputs(confsNet, ranksNet, signNet, taskMTLinputs[1]["targGenes"],
-        taskMTLinputs[2]["allPredictors"])
+    println("Buliding TRNs using ebic")
+    confsNet, ranksNet, signNet = buildTRNs(Xs, YSs,
+        Smin = 0.02, Smax = 1, Ssteps = 10, nB = 3, nboots = 1, priors = priors,
+        fit = :ebic, nsamps = nsamps, ntasks = ntasks)
+    println("EBIC AUPR: ",getAUPR(confsNet, gs, geneNames, TFNames))
+    println("Buliding TRNs using cv")
+    confsNet, ranksNet, signNet = buildTRNs(Xs, YSs,
+        Smin = 0.02, Smax = 1, Ssteps = 10, nB = 3, nboots = 1, priors = priors,
+        fit = :cv, nsamps = nsamps, ntasks = ntasks, nfolds = 2)
+    println("CV AUPR: ",getAUPR(confsNet, gs, geneNames, TFNames))
+    getGSfits(Xs, YSs, gs, geneNames, TFNames,
+        Smin = 0.02, Smax = 1, Ssteps = 10, nB = 3, nboots = 1, priors = priors,
+        fit = :AUPR, nsamps = nsamps, ntasks = ntasks)
 end
-
-gs = readdlm("micro_RNAseq_small_GS.txt",String)
-getGSfits(Xs, YSs, gs, geneNames, TFNames,
-    Smin = 0.01, Smax = 1, Ssteps = 10, nB = 3, nboots = 1, priors = priors,
-    fit = :AUPR, nsamps = nsamps, ntasks = ntasks)
