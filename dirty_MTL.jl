@@ -14,6 +14,7 @@ using StatPlots
 using MAT
 using IterTools
 using MultivariateStats
+using DataFrames
 pyplot()
 
 function preprocess_data(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1})
@@ -154,8 +155,8 @@ end
 
 function dirty_multitask_lasso(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1};
     P = nothing , lamB = 0., lamS = 0.,
-    Cs = nothing, Ds = nothing, S = nothing, B = nothing, maxiter = 1000,
-    tolerance = 1e-4, score = false, ntasks = nothing, npreds = nothing)
+    Cs = nothing, Ds = nothing, S = nothing, B = nothing, maxiter = 10000,
+    tolerance = 1e-7, score = false, ntasks = nothing, npreds = nothing)
     """Fits regression model in which the weights matrix W (predictors x tasks)
     is decomposed in two components: B that captures block structure across tasks
     and S that allows for the differences.
@@ -217,14 +218,14 @@ end
 
 function ebic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
     W::Array{Float64,2}, n_tasks::Int64, n_samples::Array{Int64,1}, n_preds::Int64;
-    gamma = 1, lamS = 0.)
+    gamma = 1)
     """Calculate EBIC for each task and take the mean"""
     EBIC = Array{Float64,1}(n_tasks)
     for k in 1:n_tasks
         samps = n_samples[k]
         currW = W[:,k]
         tot_preds = length(currW)
-        nonzero_pred = sum(Int,sum(abs.(currW) .> lamS))
+        nonzero_pred = sum(Int,sum(abs.(currW) .> 0))
         RSS = get_RSS(Xs[k],Ys[k],W[:,k])
         BIC_penalty = nonzero_pred*log(samps)
         if nonzero_pred == 0 || nonzero_pred == tot_preds
@@ -302,7 +303,7 @@ end
 
 function fit_gene_ebic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
     Ds::Array{Array{Float64,2},1}, ntasks::Int64, npreds::Int64,nsamps::Array{Int64,1},
-    lamSs::Array{Float64,1}, fit::Symbol; nB = 3, prior = nothing)
+    lamSs::Array{Float64,1}; nB = 3, prior = nothing)
     """For one gene, calculate fit for each pair of lamS, lamB
     fit options
     Note: sliding window for lambdaB"""
@@ -325,11 +326,7 @@ function fit_gene_ebic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1}
             W,B,S = dirty_multitask_lasso(Xs, Ys;
                 P = prior, lamB = lamB, lamS = lamS,
                 Cs = Cs, Ds = Ds, S = S, B = B, ntasks = ntasks, npreds = npreds)
-            if fit == :ebic
-                currFit = ebic(Xs, Ys, W, ntasks, nsamps, npreds)
-            else
-                currFit = ebic(Xs, Ys, W, ntasks, nsamps, npreds, lamS = lamS)
-            end
+            currFit = ebic(Xs, Ys, W, ntasks, nsamps, npreds)
             if Bi == 1
                 outerS = S
                 outerB = B
@@ -372,7 +369,7 @@ function fit_network(Xs::Array{Array{Float64,2},1},
     lamSs = 10.^logLamSRange
     geneFits = Array{Float64,2}(length(lamSs)*nB,ngenes)
     lambdas = Array{Float64,2}(length(lamSs)*nB,2)
-    if fit == :ebic || fit == :modEbic
+    if fit == :ebic
         Xs,YSs = preprocess_data(Xs, YSs)
         ~,Ds = covariance_update_terms(Xs, Array{Array{Float64,1},1}(0), calcCs = false, calcDs = true)
     elseif fit == :cv
@@ -410,7 +407,7 @@ function fit_network(Xs::Array{Array{Float64,2},1},
     end
     println("Estimating fits for " * string(ngenes) * " genes")
     @showprogress for genei = 1:ngenes
-        if fit == :ebic || fit == :modEbic
+        if fit == :ebic
             Ys = Array{Array{Float64,1},1}(ntasks)
             P = Array{Float64,2}(npreds, ntasks)
             for k = 1:ntasks
@@ -422,7 +419,7 @@ function fit_network(Xs::Array{Array{Float64,2},1},
                 end
             end
             Fits, lambdas = fit_gene_ebic(Xs, Ys, Ds,
-            ntasks, npreds, nsamps, lamSs, fit, nB = nB, prior = P)
+            ntasks, npreds, nsamps, lamSs, nB = nB, prior = P)
         elseif fit == :cv
             P = Array{Float64,2}(npreds, ntasks)
             for k = 1:ntasks
@@ -490,9 +487,9 @@ function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},
     edge_ranks = Array{Array{Float64,2},1}(ntasks)
     edge_signs = Array{Array{Float64,2},1}(ntasks)
     for task = 1:ntasks
-        edge_confs[task] = zeros(ngenes, npreds)
-        edge_ranks[task] = zeros(ngenes, npreds)
-        edge_signs[task] = zeros(ngenes, npreds)
+        edge_confs[task] = zeros(npreds, ngenes)
+        edge_ranks[task] = zeros(npreds, ngenes)
+        edge_signs[task] = zeros(npreds, ngenes)
     end
     for genei = 1:ngenes
         Ys = Array{Array{Float64,1},1}(ntasks)
@@ -511,24 +508,25 @@ function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},
             Cs = Cs, Ds = Ds, ntasks = ntasks, npreds = npreds)
         for task = 1:ntasks
             currBeta = W[:,task]
+            currYs = Ys[task]
             nzeroPreds = find(currBeta)
-            currNzeroXs = preprocess_data(currXs[task][:,nzeroPreds], score_Y = false)
+            currNzeroXs = Xs[task][:,nzeroPreds]
             rescaledBeta = llsq(currNzeroXs, currYs, bias = false)
             varResidAll = var(currNzeroXs*rescaledBeta - currYs)
-            gene_edge_confs = Array{Float64,1}(npreds)
+            gene_edge_confs = zeros(npreds)
             for nzeroPred = 1:length(nzeroPreds)
                 ogIndex = nzeroPreds[nzeroPred]
                 noPredBeta = deepcopy(rescaledBeta)
                 noPredBeta[nzeroPred] = 0
                 varResidPred = var(currNzeroXs*noPredBeta - currYs)
-                gene_edge_confs[ogIndex] = 1-(varResidAll/varResidPred)
+                gene_edge_confs[ogIndex] = (1-(varResidAll/varResidPred))
             end
-            edge_confs[task][genei,:] = gene_edge_confs
+            edge_confs[task][:,genei] = gene_edge_confs
             gene_edge_ranks = tiedrank(gene_edge_confs,rev = true)
-            edge_ranks[task][genei,:] = gene_edge_ranks
+            edge_ranks[task][:,genei] = gene_edge_ranks
             currEdgeSigns = zeros(npreds)
             currEdgeSigns[nzeroPreds] = sign.(rescaledBeta)
-            edge_signs[task][genei,:] = currEdgeSigns
+            edge_signs[task][:,genei] = currEdgeSigns
         end
     end
     return edge_confs, edge_ranks, edge_signs
@@ -614,11 +612,161 @@ function buildTRNs(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1}
     return(confsNet, ranksNet, signNet)
 end
 
-function buildOutputs(confsNet, ranksNet, signNet, targetGenes,
-    targetPredictors)
-    """Otuput a sparse tsv of network connections"""
-    return 0
+function buildOutputs(confsNet::Array{Float64,2}, targetGenes::Array{String,1},
+    targetTFs::Array{String,1}; otherNets = nothing)
+    """Output a sparse tsv of network connections. Must have a confidence network
+    in which rows are TFs and columns are genes"""
+    nzero = find(confsNet .!= 0)
+    nzeroRows_Cols = ind2sub(size(confsNet),nzero)
+    nzeroTFs = targetTFs[nzeroRows_Cols[1]]
+    nzeroGenes = targetGenes[nzeroRows_Cols[2]]
+    nzeroConfs = confsNet[nzero]
+    sparseNet = hcat(nzeroTFs, nzeroGenes, nzeroConfs)
+    sortedSparseNet = sortrows(sparseNet, by = (x)->x[3], rev = true)
+    return sortedSparseNet
 end
+
+function getAUPR(confsNets::Array{Array{Float64, 2},1}, gs::Array{String,2},
+    geneNames::Array{String, 1}, TFnames::Array{String, 1})
+    ntasks = length(confsNets)
+    AUPRs = Array{Float64, 1}(ntasks)
+    for k = 1:ntasks
+        confsNet = confsNets[k]
+        sortedSparseNet = buildOutputs(confsNet, geneNames, TFnames)
+        validInteractions = intersect(find(indexin(sortedSparseNet[:,1],gs[:,1])),
+            find(indexin(sortedSparseNet[:,2],gs[:,2])))
+        validNet = sortedSparseNet[validInteractions,:]
+        nInferred = size(validNet,1)
+        infTuples = Array{Tuple{String,String},1}(nInferred)
+        for i = 1:nInferred
+            infTuples[i] = (validNet[i,[1,2]]...)
+        end
+        TEdges = size(gs, 2)
+        gsTuples = Array{Tuple{String,String},1}(TEdges)
+        for i = 1:TEdges
+            gsTuples[i] = (gs[i,:]...)
+        end
+        InGs = sign.(indexin(infTuples, gsTuples))
+        totLevels = length(InGs)
+        precisions = zeros(totLevels)
+        recalls = zeros(totLevels)
+        for lev = 1:totLevels
+            numTrue = sum(InGs[1:lev])
+            precisions[lev] = numTrue/lev
+            recalls[lev] = numTrue/TEdges
+        end
+        heights = (precisions[2:end] + precisions[1:end - 1])/2
+        widths = recalls[2:end] - recalls[1:end-1]
+        AUPRs[k] = heights' * widths
+    end
+    return -(mean(AUPRs))
+end
+
+function fit_network_AUPR(Xs::Array{Array{Float64,2},1},
+    YSs::Array{Array{Float64,2},1}, gs::Array{String,2}, geneNames::Array{String,1},
+    TFnames::Array{String,1}; Smin = 0.01, Smax = 1,
+    Ssteps = 10, nB = 4, priors = nothing, fit = :AUPR, npreds = nothing,
+    nsamps = nothing, ngenes = nothing)
+    """Calculate fit for each gene in a network. Plot grid of median fits.
+    Return lambdaS and lambdaB within 1 se of the minimum fit."""
+    ntasks = length(Xs)
+    if npreds==nothing;npreds = size(Xs[1], 2);end
+    if nsamps==nothing
+        nsamps = Array{Int64, 1}(ntasks)
+        for task = 1:ntasks
+            nsamps[task] = size(Xs[task], 1)
+        end
+    end
+    if ngenes==nothing;ngenes = size(YSs[1],2);end
+    lamSlog10step = 1/Ssteps
+    logLamSRange = log10(Smin):lamSlog10step:log10(Smax)
+    lamSs = 10.^logLamSRange
+    geneFits = Array{Float64,2}(length(lamSs)*nB,ngenes)
+    lambdas = Array{Float64,2}(length(lamSs)*nB,2)
+    Xs,YSs = preprocess_data(Xs, YSs)
+    ~,Ds = covariance_update_terms(Xs, Array{Array{Float64,1},1}(0), calcCs = false, calcDs = true)
+    nS = length(lamSs)
+    lambdas = Array{Float64, 2}(nS*nB, 2)
+    Fits = Array{Float64, 1}(nS*nB)
+    #Use a warm start
+    lambdasi = 1
+    outerS = nothing
+    outerB = nothing
+    println("Getting AUPR for each lambda pair")
+    @showprogress for Si = 1:nS
+        lamS = lamSs[(nS+1) - Si]
+        #Note: lamS <= lamB <= ntasks*lamS
+        lamBs = logspace(log10(lamS), log10(2*lamS), nB)
+        S = outerS
+        B = outerB
+        for Bi = 1:nB
+            lamB = lamBs[(nB + 1) - Bi]
+            edge_confs, edge_ranks, edge_signs = GetBestNets(Xs, YSs,
+                lamS, lamB; priors = priors, ntasks = ntasks, npreds = npreds,
+                ngenes = ngenes)
+            currFit = getAUPR(edge_confs, gs, geneNames, TFnames)
+            if Bi == 1
+                outerS = S
+                outerB = B
+            end
+            Fits[lambdasi] = currFit
+            lambdas[lambdasi,:] = [lamS,lamB]
+            lambdasi += 1
+        end
+    end
+    networkFits = Fits
+    lambda_sum = lambdas[:,1] + lambdas[:,2]/2
+    sorted_indexes = sortperm(lambda_sum)
+    sorted_lambda = lambdas[sorted_indexes,:]
+    sortedFits = networkFits[sorted_indexes]
+    chosenInd = within1seMin(sortedFits)
+    chosenLams = sorted_lambda[chosenInd,:]
+    minInd = indmin(networkFits)
+    p::Plots.Plot = plot(lambdas[:,1],lambdas[:,2], seriestype=:scatter,
+    marker_z = networkFits, markershape = :rect, markersize = 6,
+    seriescolor = :Spectral, xlabel = "lambda S", ylabel = "lambda B",
+    label = "", colorbar_title = "Fit", xscale = :log10, yscale = :log10,
+    xlims = (10^(log10(minimum(lambdas[:,1]))-0.1), 10^(log10(maximum(lambdas[:,1]))+0.1)),
+    ylims = (10^(log10(minimum(lambdas[:,2]))-0.1), 10^(log10(maximum(lambdas[:,2]))+0.1)),
+    annotations = [(chosenLams[1], chosenLams[2], text("o", :darkorange)),
+    (lambdas[minInd,1], lambdas[minInd,2], text("x", :violet))])
+    display(p)
+    fitsOut = "EstimatedFits_" * string(fit)
+    savefig(fitsOut * ".pdf")
+    matwrite(fitsOut * ".mat", Dict(
+            "lambdas" => lambdas,
+            "geneFits" => geneFits,
+            "networkFits" => networkFits
+    ))
+    return chosenLams
+end
+
+function getGSfits(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1},
+    gs::Array{String,2}, geneNames::Array{String,1}, TFnames::Array{String,1};
+    Smin = 0.05, Smax = 1, Ssteps = 10, nB = 3, nboots = 1, priors = nothing,
+    fit = :ebic, nsamps = nothing, ntasks = nothing)
+    if ntasks == nothing;ntasks = lenght(Xs);end
+    if nsamps == nothing
+        for k = 1:ntasks
+            nsamps[k] = size(Xs[k],1)
+        end
+    end
+    println("Getting AUPR")
+    sampleXs = deepcopy(Xs)
+    sampleYSs = deepcopy(YSs)
+    if nboots != 1
+        for task = 1:ntasks
+            currSamps = nsamps[task]
+            samples = sample(1:currSamps,currSamps)
+            sampleXs[task] =  Xs[task][samples,:]
+            sampleYSs[task] = YSs[task][samples,:]
+        end
+    end
+    lams =  fit_network_AUPR(sampleXs, sampleYSs, gs, geneNames, TFnames, Smin = Smin,
+        Smax = Smax, Ssteps = Ssteps, nB = nB, priors = priors)
+    return(lams)
+end
+
 
 function MTL(nboots = 1)
     """MAIN: fit TRNs for multiple tasks using multitask learning"""
@@ -649,7 +797,14 @@ function MTL(nboots = 1)
     println("Buliding TRNs")
     confsNet, ranksNet, signNet = buildTRNs(Xs, YSs,
         Smin = 0.01, Smax = 1, Ssteps = 10, nB = 3, nboots = 1, priors = priors,
-        fit = :modEbic, nsamps = nsamps, ntasks = ntasks)
+        fit = :ebic, nsamps = nsamps, ntasks = ntasks)
+    geneNames = convert(Array{String,1}, vec(Array(taskMTLinputs[1]["targGenes"])))
+    TFNames = convert(Array{String,1}, vec(taskMTLinputs[1]["allPredictors"]))
     buildOutputs(confsNet, ranksNet, signNet, taskMTLinputs[1]["targGenes"],
         taskMTLinputs[2]["allPredictors"])
 end
+
+gs = readdlm("micro_RNAseq_small_GS.txt",String)
+getGSfits(Xs, YSs, gs, geneNames, TFNames,
+    Smin = 0.01, Smax = 1, Ssteps = 10, nB = 3, nboots = 1, priors = priors,
+    fit = :AUPR, nsamps = nsamps, ntasks = ntasks)
