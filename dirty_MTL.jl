@@ -483,7 +483,7 @@ function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},
     if ntasks == nothing;ntasks = length(Xs);end
     ~,Ds = covariance_update_terms(Xs, Array{Array{Float64,1},1}(0), calcCs = false, calcDs = true)
     if npreds == nothing;npreds = size(Xs[1], 2);end
-    if ngenes == nothing;ngenes = length(YSs);end
+    if ngenes == nothing;ngenes = size(YSs[1],2);end
     edge_confs = Array{Array{Float64,2},1}(ntasks)
     edge_ranks = Array{Array{Float64,2},1}(ntasks)
     edge_signs = Array{Array{Float64,2},1}(ntasks)
@@ -582,7 +582,7 @@ function buildTRNs(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1}
         end
         lams =  fit_network(sampleXs, sampleYSs, Smin = Smin,
         Smax = Smax, Ssteps = Ssteps, nB = nB, priors = priors, fit = fit, nfolds = nfolds)
-        println(size(lams))
+        println("Optimal lambda pair for "* string(boot) * "th bootstrap: ", lams)
         lamS = lams[1]; lamB = lams[2]
         currConfs, currRanks, currSigns = GetBestNets(Xs, YSs,
         lamS, lamB, priors = priors, ntasks = ntasks)
@@ -600,7 +600,7 @@ function buildTRNs(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1}
         currMeanConfs = mean(confs[task])
         currMeanRanks = mean(ranks[task])
         currMeanSigns = mean(signs[task])
-        TFsPerGene = sum(sign.(currMeanConfs),1)
+        TFsPerGene = sum(sign.(currMeanConfs),1)[:]
         plots[task] = histogram(TFsPerGene, label = "", title = "Task: "*string(task),
             xlabel = "TFs/Gene", ylabel = "count")
         confsNet[task] = currMeanConfs
@@ -620,7 +620,7 @@ function buildTRNs(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1}
 end
 
 function buildOutputs(confsNet::Array{Float64,2}, targetGenes::Array{String,1},
-    targetTFs::Array{String,1}; otherNets = nothing)
+    targetTFs::Array{String,1}, filePathName::String; otherNets = nothing)
     """Output a sparse tsv of network connections. Must have a confidence network
     in which rows are TFs and columns are genes"""
     nzero = find(confsNet .!= 0)
@@ -630,20 +630,26 @@ function buildOutputs(confsNet::Array{Float64,2}, targetGenes::Array{String,1},
     nzeroConfs = confsNet[nzero]
     sparseNet = hcat(nzeroTFs, nzeroGenes, nzeroConfs)
     sortedSparseNet = sortrows(sparseNet, by = (x)->x[3], rev = true)
+    if filePathName != ""
+        writedlm(filePathName, sortedSparseNet)
+    end
     return sortedSparseNet
 end
 
 function getAUPR(confsNets::Array{Array{Float64, 2},1}, gs::Array{String,2},
-    geneNames::Array{String, 1}, TFnames::Array{String, 1})
+    geneNames::Array{String, 1}, TFnames::Array{String, 1}, filePathName::String)
     ntasks = length(confsNets)
     AUPRs = Array{Float64, 1}(ntasks)
     for k = 1:ntasks
         confsNet = confsNets[k]
-        sortedSparseNet = buildOutputs(confsNet, geneNames, TFnames)
+        sortedSparseNet = buildOutputs(confsNet, geneNames, TFnames, filePathName)
         validInteractions = intersect(find(indexin(sortedSparseNet[:,1],gs[:,1])),
             find(indexin(sortedSparseNet[:,2],gs[:,2])))
         validNet = sortedSparseNet[validInteractions,:]
         nInferred = size(validNet,1)
+        if filePathName != ""
+            println("MTL inferred: ", nInferred, " potential interactions that overlap with gs")
+        end
         infTuples = Array{Tuple{String,String},1}(nInferred)
         for i = 1:nInferred
             infTuples[i] = (validNet[i,[1,2]]...)
@@ -654,6 +660,7 @@ function getAUPR(confsNets::Array{Array{Float64, 2},1}, gs::Array{String,2},
             gsTuples[i] = (gs[i,:]...)
         end
         InGs = sign.(indexin(infTuples, gsTuples))
+        println(sum(InGs), " of these edges were correctly inferred")
         totLevels = length(InGs)
         precisions = zeros(totLevels)
         recalls = zeros(totLevels)
@@ -711,7 +718,7 @@ function fit_network_AUPR(Xs::Array{Array{Float64,2},1},
             edge_confs, edge_ranks, edge_signs = GetBestNets(Xs, YSs,
                 lamS, lamB; priors = priors, ntasks = ntasks, npreds = npreds,
                 ngenes = ngenes)
-            currFit = getAUPR(edge_confs, gs, geneNames, TFnames)
+            currFit = getAUPR(edge_confs, gs, geneNames, TFnames, "")
             if Bi == 1
                 outerS = S
                 outerB = B
@@ -780,6 +787,8 @@ function MTL(nboots = 1)
     TaskMatPaths = ["./fitSetup/RNAseqWmicro20genes_ATAC_Th17_bias50.mat",
         "./fitSetup/microarrayWbulk20genes_ATAC_Th17_bias50.mat"]
     gs = readdlm("micro_RNAseq_small_GS.txt",String)
+    currWd = pwd()
+    OutputDir = "./20gene_06_18"
     ntasks = length(TaskMatPaths)
     nsamps = Array{Int64}(ntasks)
     ngenes = Int64
@@ -804,17 +813,22 @@ function MTL(nboots = 1)
     end
     geneNames = convert(Array{String,1}, vec(Array(taskMTLinputs[1]["targGenes"])))
     TFNames = convert(Array{String,1}, vec(taskMTLinputs[1]["allPredictors"]))
+    if !isdir(OutputDir)
+        mkdir(OutputDir)
+    end
+    cd(OutputDir)
     println("Buliding TRNs using ebic")
     confsNet, ranksNet, signNet = buildTRNs(Xs, YSs,
         Smin = 0.02, Smax = 1, Ssteps = 10, nB = 3, nboots = 1, priors = priors,
         fit = :ebic, nsamps = nsamps, ntasks = ntasks)
-    println("EBIC AUPR: ",getAUPR(confsNet, gs, geneNames, TFNames))
+    println("EBIC AUPR: ",getAUPR(confsNet, gs, geneNames, TFNames, "EBIC_NET_sp.tsv"))
     println("Buliding TRNs using cv")
     confsNet, ranksNet, signNet = buildTRNs(Xs, YSs,
         Smin = 0.02, Smax = 1, Ssteps = 10, nB = 3, nboots = 1, priors = priors,
         fit = :cv, nsamps = nsamps, ntasks = ntasks, nfolds = 2)
-    println("CV AUPR: ",getAUPR(confsNet, gs, geneNames, TFNames))
+    println("CV AUPR: ",getAUPR(confsNet, gs, geneNames, TFNames, "CV_NET_sp.tsv"))
     getGSfits(Xs, YSs, gs, geneNames, TFNames,
         Smin = 0.02, Smax = 1, Ssteps = 10, nB = 3, nboots = 1, priors = priors,
         fit = :AUPR, nsamps = nsamps, ntasks = ntasks)
+    cd(currWd)
 end
