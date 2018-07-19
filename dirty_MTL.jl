@@ -14,7 +14,6 @@ using StatPlots
 using MAT
 using IterTools
 using MultivariateStats
-using DataFrames
 pyplot()
 
 function preprocess_data(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1})
@@ -459,6 +458,7 @@ function fit_network(Xs::Array{Array{Float64,2},1},
     chosenInd = within1seMin(sortedFits)
     chosenLams = sorted_lambda[chosenInd,:]
     minInd = indmin(networkFits)
+    println("Creating Plots for lambda outputs")
     p::Plots.Plot = plot(lambdas[:,1],lambdas[:,2], seriestype=:scatter,
     marker_z = networkFits, markershape = :rect, markersize = 6,
     seriescolor = :Spectral, xlabel = "lambda S", ylabel = "lambda B",
@@ -817,12 +817,12 @@ end
 
 function MTL(nboots = 1)
     """MAIN: fit TRNs for multiple tasks using multitask learning"""
-    TaskMatPaths = ["./fitSetup/RNAseqWmicro_ATAC_Th17_bias50.mat",
-        "./fitSetup/microarrayWbulk_ATAC_Th17_bias50.mat"]
-    gs = readdlm("KC1p5_sp.tsv",String)
+    TaskMatPaths = ["./fitSetup/RNAseqWmicro20genes_ATAC_Th17_bias50.mat",
+        "./fitSetup/microarrayWbulk20genes_ATAC_Th17_bias50.mat"]
+    gs = readdlm("micro_RNAseq_small_GS.txt",String)
     gs = gs[2:end,1:2]
     currWd = pwd()
-    OutputDir = "./20gene_06_18"
+    OutputDir = "./20gene_06_19"
     ntasks = length(TaskMatPaths)
     nsamps = Array{Int64}(ntasks)
     ngenes = Int64
@@ -866,3 +866,5 @@ function MTL(nboots = 1)
         fit = :AUPR, nsamps = nsamps, ntasks = ntasks)
     cd(currWd)
 end
+
+MTL()
