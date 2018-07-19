@@ -94,7 +94,7 @@ function updateS(Cs::Array{Array{Float64,1},1}, Ds::Array{Array{Float64,2},1},
 end
 
 function updateB(Cs::Array{Array{Float64,1},1}, Ds::Array{Array{Float64,2},1},
-    B::Array{Float64,2}, S::Array{Float64,2}, lamB::Float64)
+    B::Array{Float64,2}, S::Array{Float64,2}, lamB::Float64, BPrior::Array{Float64,1})
     """returns updated coefficients for B (predictors x tasks)
         block regularized (l_1/l_inf) -- using cyclical coordinate descent and
         soft-thresholding on the l_1 norm across tasks
@@ -121,7 +121,7 @@ function updateB(Cs::Array{Array{Float64,1},1}, Ds::Array{Array{Float64,2},1},
             end
         end
         #set all tasks to zero if their l1-norm is too small
-        if (sum(abs.(weights)) <= lamB)
+        if (sum(abs.(weights)) <= lamB*BPrior[j])
             B[j,:] = 0
         else
             #Find number of coefs that would make l1-norm > lamB
@@ -174,6 +174,10 @@ function dirty_multitask_lasso(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Fl
     end
     if S == nothing;S = zeros(npreds, ntasks);end
     if B == nothing;B = zeros(npreds, ntasks);end
+    #Make block prior all 1's, except where the sparse prior has inf
+    InfRows = ind2sub(size(P), find(P .== Inf))[1]
+    BPrior = ones(npreds)
+    BPrior[InfRows] = Inf
     W = S .+ B
     SOut = zeros(npreds, ntasks)
     BOut = zeros(npreds, ntasks)
@@ -183,11 +187,12 @@ function dirty_multitask_lasso(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Fl
     for i = 1:maxiter
         W_old = deepcopy(W)
         S = updateS(currCs, currDs, B, S, lamS, P)
-        B = updateB(currCs, currDs, B, S, lamB)
+        B = updateB(currCs, currDs, B, S, lamB, BPrior)
         active_set = find(maximum(S.+B,2) .!= 0)
         S = S[active_set,:]
         B = B[active_set,:]
         P = P[active_set,:]
+        BPrior = BPrior[active_set]
         for task in 1:ntasks
             currCs[task] = currCs[task][active_set]
             currDs[task] = currDs[task][active_set,active_set]
@@ -510,28 +515,41 @@ function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},
         for task = 1:ntasks
             currBeta = W[:,task]
             currYs = Ys[task]
-            nzeroPreds = find(currBeta)
-            nsamps = size(Xs[task],1)
-            if length(nzeroPreds) >  nsamps #Might want to print a warning for this too
-                sortedIndexes = sortperm(currBeta[nzeroPreds], rev = true)
-                nzeroPreds = nzeroPreds[sortedIndexes][1:(nsamps-1)]
-            end
-            currNzeroXs = Xs[task][:,nzeroPreds]
-            rescaledBeta = llsq(currNzeroXs, currYs, bias = false)
-            varResidAll = var(currNzeroXs*rescaledBeta - currYs)
+            currX = Xs[task]
+            cheater = find(sum(abs.(currX .- currYs),1) .== 0.0)
+            nzeroPreds = symdiff(find(currBeta),cheater)
             gene_edge_confs = zeros(npreds)
-            for nzeroPred = 1:length(nzeroPreds)
-                ogIndex = nzeroPreds[nzeroPred]
-                noPredBeta = deepcopy(rescaledBeta)
-                noPredBeta[nzeroPred] = 0
-                varResidPred = var(currNzeroXs*noPredBeta - currYs)
-                gene_edge_confs[ogIndex] = (1-(varResidAll/varResidPred))
+            currEdgeSigns = zeros(npreds)
+            if length(nzeroPreds) > 0
+                nsamps = size(Xs[task],1)
+                if length(nzeroPreds) >  nsamps #Might want to print a warning for this too
+                    sortedIndexes = sortperm(currBeta[nzeroPreds], rev = true)
+                    nzeroPreds = nzeroPreds[sortedIndexes][1:(nsamps-1)]
+                end
+                currNzeroXs = currX[:,nzeroPreds]
+                rescaledBeta = llsq(currNzeroXs, currYs, bias = false)
+                varResidAll = var(currNzeroXs*rescaledBeta - currYs)
+                for nzeroPred = 1:length(nzeroPreds)
+                    ogIndex = nzeroPreds[nzeroPred]
+                    noPredBeta = deepcopy(rescaledBeta)
+                    noPredBeta[nzeroPred] = 0
+                    varResidPred = var(currNzeroXs*noPredBeta - currYs)
+                    gene_edge_confs[ogIndex] = (1-(varResidAll/varResidPred))
+                    if isnan(varResidAll/varResidPred)
+                        println(varResidAll)
+                        println(varResidPred)
+                        println(currYs)
+                        println(currNzeroXs)
+                        println(rescaledBeta)
+                        println(sum(abs.(currNzeroXs .- currYs),2))
+                        println(sum(abs.(currNzeroXs .- currYs),1))
+                    end
+                end
+                currEdgeSigns[nzeroPreds] = sign.(rescaledBeta)
             end
             edge_confs[task][:,genei] = gene_edge_confs
             gene_edge_ranks = tiedrank(gene_edge_confs,rev = true)
             edge_ranks[task][:,genei] = gene_edge_ranks
-            currEdgeSigns = zeros(npreds)
-            currEdgeSigns[nzeroPreds] = sign.(rescaledBeta)
             edge_signs[task][:,genei] = currEdgeSigns
         end
     end
@@ -646,6 +664,11 @@ function getAUPR(confsNets::Array{Array{Float64, 2},1}, gs::Array{String,2},
         validInteractions = intersect(find(indexin(sortedSparseNet[:,1],gs[:,1])),
             find(indexin(sortedSparseNet[:,2],gs[:,2])))
         validNet = sortedSparseNet[validInteractions,:]
+        uniqueTFs = intersect(gs[:,1],TFnames)
+        uniqueGenes = intersect(gs[:,2],geneNames)
+        validGSInteractions = intersect(find(indexin(gs[:,1],TFnames)),
+            find(indexin(gs[:,2], geneNames)))
+        validGS = gs[validGSInteractions,:]
         nInferred = size(validNet,1)
         if filePathName != ""
             println("MTL inferred: ", nInferred, " potential interactions that overlap with gs")
@@ -654,26 +677,36 @@ function getAUPR(confsNets::Array{Array{Float64, 2},1}, gs::Array{String,2},
         for i = 1:nInferred
             infTuples[i] = (validNet[i,[1,2]]...)
         end
-        TEdges = size(gs, 2)
+        TEdges = size(validGS, 1)
         gsTuples = Array{Tuple{String,String},1}(TEdges)
         for i = 1:TEdges
-            gsTuples[i] = (gs[i,:]...)
+            gsTuples[i] = (validGS[i,:]...)
         end
         InGs = sign.(indexin(infTuples, gsTuples))
-        println(sum(InGs), " of these edges were correctly inferred")
-        totLevels = length(InGs)
+        if filePathName != ""
+            println(sum(InGs), " of these edges were correctly inferred")
+        end
+        confLevels = unique(validNet[:,3])
+        totLevels = length(confLevels)
         precisions = zeros(totLevels)
         recalls = zeros(totLevels)
         for lev = 1:totLevels
-            numTrue = sum(InGs[1:lev])
-            precisions[lev] = numTrue/lev
-            recalls[lev] = numTrue/TEdges
+            levelInds = find(validNet[:,3] .>= confLevels[lev])
+            TP = sum(InGs[levelInds])
+            precisions[lev] = TP/length(levelInds)
+            recalls[lev] = TP/TEdges
         end
-        heights = (precisions[2:end] + precisions[1:end - 1])/2
-        widths = recalls[2:end] - recalls[1:end-1]
+        precisions = [precisions[1]; precisions;TEdges/(length(uniqueTFs)*length(uniqueGenes))]
+        recalls = [0; recalls;1]
+        heights = (precisions[2:end] + precisions[1:(end - 1)])/2
+        widths = recalls[2:end] - recalls[1:(end-1)]
         AUPRs[k] = heights' * widths
     end
-    return -(mean(AUPRs))
+    if filePathName == ""
+        return -mean(AUPRs)
+    else
+        return mean(AUPRs)
+    end
 end
 
 function fit_network_AUPR(Xs::Array{Array{Float64,2},1},
@@ -784,9 +817,10 @@ end
 
 function MTL(nboots = 1)
     """MAIN: fit TRNs for multiple tasks using multitask learning"""
-    TaskMatPaths = ["./fitSetup/RNAseqWmicro20genes_ATAC_Th17_bias50.mat",
-        "./fitSetup/microarrayWbulk20genes_ATAC_Th17_bias50.mat"]
-    gs = readdlm("micro_RNAseq_small_GS.txt",String)
+    TaskMatPaths = ["./fitSetup/RNAseqWmicro_ATAC_Th17_bias50.mat",
+        "./fitSetup/microarrayWbulk_ATAC_Th17_bias50.mat"]
+    gs = readdlm("KC1p5_sp.tsv",String)
+    gs = gs[2:end,1:2]
     currWd = pwd()
     OutputDir = "./20gene_06_18"
     ntasks = length(TaskMatPaths)
