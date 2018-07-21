@@ -158,8 +158,8 @@ end
 function dirty_multitask_lasso(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1};
     P::Array{Float64,2} = Array{Float64,2}(0,0), lamB::Float64 = 0., lamS::Float64 = 0.,
     Cs::Array{Array{Float64, 1},1} = Array{Array{Float64, 1},1}(0), Ds::Array{Array{Float64, 2},1} = Array{Array{Float64, 2},1}(0),
-    S::Array{Float64,2} = Array{Float64,2}(0,0), B::Array{Float64,2} = Array{Float64,2}(0,0), maxiter::Int64 = 1000,
-    tolerance::Float64 = 1e-4, score::Bool = false, ntasks::Int64 = 0, npreds::Int64 = 0)
+    S::Array{Float64,2} = Array{Float64,2}(0,0), B::Array{Float64,2} = Array{Float64,2}(0,0), maxiter::Int64 = 10000,
+    tolerance::Float64 = 1e-7, score::Bool = false, ntasks::Int64 = 0, npreds::Int64 = 0)
     """Fits regression model in which the weights matrix W (predictors x tasks)
     is decomposed in two components: B that captures block structure across tasks
     and S that allows for the differences.
@@ -225,15 +225,17 @@ function approxLnNFact(n::Int64)
 end
 
 function ebic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
-    W::Array{Float64,2}, n_tasks::Int64, n_samples::Array{Int64,1}, n_preds::Int64;
-    gamma::Int64 = 1)
+    W::Array{Float64,2}, n_tasks::Int64, n_samples::Array{Int64,1}, n_preds::Int64,
+    predictorWeights::Array{Float64,2}; gamma::Int64 = 1)
     """Calculate EBIC for each task and take the mean"""
     EBIC = Array{Float64,1}(n_tasks)
     for k in 1:n_tasks
+        currPW = predictorWeights[:,k]
         samps = n_samples[k]
         currW = W[:,k]
         tot_preds = length(currW)
-        nonzero_pred = sum(Int,sum(abs.(currW) .> 0))
+        currNzero = find(currW)
+        nonzero_pred = ceil(Int,sum(abs.(sign.(currW[currNzero])) .* currPW[currNzero]))
         RSS = get_RSS(Xs[k],Ys[k],W[:,k])
         BIC_penalty = nonzero_pred*log(samps)
         if nonzero_pred == 0 || nonzero_pred == tot_preds
@@ -313,7 +315,8 @@ end
 
 function fit_gene_ebic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
     Ds::Array{Array{Float64,2},1}, ntasks::Int64, npreds::Int64,nsamps::Array{Int64,1},
-    lamSs::Array{Float64,1}; nB::Int64 = 3, prior::Array{Float64,2} = Array{Float64,2}(0,0))
+    lamSs::Array{Float64,1}; nB::Int64 = 3, prior::Array{Float64,2} = Array{Float64,2}(0,0),
+    fit::Symbol = :ebic)
     """For one gene, calculate fit for each pair of lamS, lamB
     fit options
     Note: sliding window for lambdaB"""
@@ -325,6 +328,11 @@ function fit_gene_ebic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1}
     lambdasi = 1
     outerS = Array{Float64,2}(0,0)
     outerB = Array{Float64,2}(0,0)
+    if fit == :ebic
+        predictorWeights = ones(size(prior))
+    else
+        predictorWeights = prior
+    end
     for Si = 1:nS
         lamS = lamSs[(nS+1) - Si]
         #Note: lamS <= lamB <= ntasks*lamS
@@ -336,7 +344,7 @@ function fit_gene_ebic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1}
             W,B,S = dirty_multitask_lasso(Xs, Ys;
                 P = prior, lamB = lamB, lamS = lamS,
                 Cs = Cs, Ds = Ds, S = S, B = B, ntasks = ntasks, npreds = npreds)
-            currFit = ebic(Xs, Ys, W, ntasks, nsamps, npreds)
+            currFit = ebic(Xs, Ys, W, ntasks, nsamps, npreds, predictorWeights)
             if Bi == 1
                 outerS = S
                 outerB = B
@@ -379,7 +387,7 @@ function fit_network(Xs::Array{Array{Float64,2},1},
     lamSs = 10.^logLamSRange
     geneFits = Array{Float64,2}(length(lamSs)*nB,ngenes)
     lambdas = Array{Float64,2}(length(lamSs)*nB,2)
-    if fit == :ebic
+    if fit == :ebic || fit == :mebic
         Xs,YSs = preprocess_data(Xs, YSs)
         ~,Ds = covariance_update_terms(Xs, Array{Array{Float64,1},1}(0), calcCs = false, calcDs = true)
     elseif fit == :cv
@@ -417,7 +425,7 @@ function fit_network(Xs::Array{Array{Float64,2},1},
     end
     println("Estimating fits for " * string(ngenes) * " genes")
     @showprogress for genei = 1:ngenes
-        if fit == :ebic
+        if fit == :ebic || fit == :mebic
             Ys = Array{Array{Float64,1},1}(ntasks)
             P = Array{Float64,2}(npreds, ntasks)
             for k = 1:ntasks
@@ -429,7 +437,7 @@ function fit_network(Xs::Array{Array{Float64,2},1},
                 end
             end
             Fits, lambdas = fit_gene_ebic(Xs, Ys, Ds,
-            ntasks, npreds, nsamps, lamSs, nB = nB, prior = P)
+            ntasks, npreds, nsamps, lamSs, nB = nB, prior = P, fit = fit)
         elseif fit == :cv
             P = Array{Float64,2}(npreds, ntasks)
             for k = 1:ntasks
@@ -534,31 +542,21 @@ function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},
                 currNzeroXs = currX[:,nzeroPreds]
                 rescaledBeta = coef(lm(currNzeroXs, currYs, false))
                 varResidAll = var(currNzeroXs*rescaledBeta - currYs)
-                if varResidAll != 0
+                while isapprox(0, varResidAll; atol = 1e-20) && length(nzeroPreds > 0)
+                    sortedIndexes = sortperm(abs.(rescaledBeta), rev = true)
+                    nzeroPreds = nzeroPreds[sortedIndexes][1:(end-1)]
+                    currNzeroXs = currX[:,nzeroPreds]
+                    rescaledBeta = coef(lm(currNzeroXs, currYs, false))
+                    varResidAll = var(currNzeroXs*rescaledBeta - currYs)
+                end
                     for nzeroPred = 1:length(nzeroPreds)
                         ogIndex = nzeroPreds[nzeroPred]
                         noPredBeta = deepcopy(rescaledBeta)
                         noPredBeta[nzeroPred] = 0
                         varResidPred = var(currNzeroXs*noPredBeta - currYs)
                         gene_edge_confs[ogIndex] = (1-(varResidAll/varResidPred))
-                        if (1-varResidAll/varResidPred) == 1
-                            println("Task: ", task)
-                            println("NUnique: ", length(unique(currYs)))
-                            println("numNonzero: ", length(nzeroPreds))
-                            println("Variance: ", var(currYs))
-                            println("samps: ", nsamps)
-                            println("OGI: ", ogIndex)
-                            println("genei: ", genei)
-                            println("All: ", varResidAll)
-                            println("Pred: ", varResidPred)
-                            println("OGbeta: ", currBeta[ogIndex])
-                            println("RescBeta: ", rescaledBeta[nzeroPred])
-                            println("S: ", lamS)
-                            println("B: ", lamB)
-                        end
                     end
                     currEdgeSigns[nzeroPreds] = sign.(rescaledBeta)
-                end
             end
             edge_confs[task][:,genei] = gene_edge_confs
             gene_edge_ranks = tiedrank(gene_edge_confs,rev = true)
@@ -731,7 +729,7 @@ function getAUPR(confsNets::Array{Array{Float64, 2},1}, gs::Array{String,2},
             plot(recalls,precisions, xlims = [0,1], ylims = [0,1],
                 label = replace(outPlotFile, ".pdf", ""), xlabel = "Recall",
                 ylabel = "Precision", linewidth = 3)
-            plot!([0,1], [minimum(precisions), minimum(precisions)],
+            plot!([0,1], [precisions[end], precisions[end]],
                 label = "Random", linewidth = 3, linecolor = :orange, linestyle = :dash)
             annotate!([(0.8, 0.5, "AUPR: " * string(round(AUPRs[k], 4)))])
             savefig(outPlotFile)
@@ -886,6 +884,11 @@ function MTL(nboots::Int64 = 1)
         mkdir(OutputDir)
     end
     cd(OutputDir)
+    println("Buliding TRNs using modified ebic")
+    confsNet, ranksNet, signNet = buildTRNs(Xs, YSs,
+        Smin = 0.5, Smax = 1., Ssteps = 2, nB = 2, nboots = 1, priors = priors,
+        fit = :mebic, nsamps = nsamps, ntasks = ntasks)
+    println("mEBIC AUPR: ",getAUPR(confsNet, gs, geneNames, TFNames, "mEBIC_NET", TaskNames = TaskNames))
     println("BuildingTRNS using AUPR")
     getGSfits(Xs, YSs, gs, geneNames, TFNames,
         Smin = 0.02, Smax = 1., Ssteps = 10, nB = 3, nboots = 1, priors = priors,
