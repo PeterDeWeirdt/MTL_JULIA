@@ -277,8 +277,8 @@ function fit_gene_cv(foldInXs::Array{Array{Array{Float64,2},1},1},
     Fits = Array{Float64, 1}(nS*nB)
     #Use a warm start
     lambdasi = 1
-    outerS = nothing
-    outerB = nothing
+    outerS = Array{Float64,2}(0,0)
+    outerB = Array{Float64,2}(0,0)
     for Si = 1:nS
         lamS = lamSs[(nS+1) - Si]
         #Note: lamS <= lamB <= ntasks*lamS
@@ -323,8 +323,8 @@ function fit_gene_ebic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1}
     Fits = Array{Float64, 1}(nS*nB)
     #Use a warm start
     lambdasi = 1
-    outerS = nothing
-    outerB = nothing
+    outerS = Array{Float64,2}(0,0)
+    outerB = Array{Float64,2}(0,0)
     for Si = 1:nS
         lamS = lamSs[(nS+1) - Si]
         #Note: lamS <= lamB <= ntasks*lamS
@@ -534,29 +534,31 @@ function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},
                 currNzeroXs = currX[:,nzeroPreds]
                 rescaledBeta = coef(lm(currNzeroXs, currYs, false))
                 varResidAll = var(currNzeroXs*rescaledBeta - currYs)
-                for nzeroPred = 1:length(nzeroPreds)
-                    ogIndex = nzeroPreds[nzeroPred]
-                    noPredBeta = deepcopy(rescaledBeta)
-                    noPredBeta[nzeroPred] = 0
-                    varResidPred = var(currNzeroXs*noPredBeta - currYs)
-                    gene_edge_confs[ogIndex] = (1-(varResidAll/varResidPred))
-                    if (1-varResidAll/varResidPred) == 1
-                        println("Task: ", task)
-                        println("NUnique: ", length(unique(currYs)))
-                        println("numNonzero: ", length(nzeroPreds))
-                        println("Variance: ", var(currYs))
-                        println("samps: ", nsamps)
-                        println("OGI: ", ogIndex)
-                        println("genei: ", genei)
-                        println("All: ", varResidAll)
-                        println("Pred: ", varResidPred)
-                        println("OGbeta: ", currBeta[ogIndex])
-                        println("RescBeta: ", rescaledBeta[nzeroPred])
-                        println("S: ", lamS)
-                        println("B: ", lamB)
+                if varResidAll != 0
+                    for nzeroPred = 1:length(nzeroPreds)
+                        ogIndex = nzeroPreds[nzeroPred]
+                        noPredBeta = deepcopy(rescaledBeta)
+                        noPredBeta[nzeroPred] = 0
+                        varResidPred = var(currNzeroXs*noPredBeta - currYs)
+                        gene_edge_confs[ogIndex] = (1-(varResidAll/varResidPred))
+                        if (1-varResidAll/varResidPred) == 1
+                            println("Task: ", task)
+                            println("NUnique: ", length(unique(currYs)))
+                            println("numNonzero: ", length(nzeroPreds))
+                            println("Variance: ", var(currYs))
+                            println("samps: ", nsamps)
+                            println("OGI: ", ogIndex)
+                            println("genei: ", genei)
+                            println("All: ", varResidAll)
+                            println("Pred: ", varResidPred)
+                            println("OGbeta: ", currBeta[ogIndex])
+                            println("RescBeta: ", rescaledBeta[nzeroPred])
+                            println("S: ", lamS)
+                            println("B: ", lamB)
+                        end
                     end
+                    currEdgeSigns[nzeroPreds] = sign.(rescaledBeta)
                 end
-                currEdgeSigns[nzeroPreds] = sign.(rescaledBeta)
             end
             edge_confs[task][:,genei] = gene_edge_confs
             gene_edge_ranks = tiedrank(gene_edge_confs,rev = true)
@@ -637,7 +639,8 @@ function buildTRNs(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1}
         ranksNet[task] = currMeanRanks
         signNet[task] = currMeanSigns
     end
-    p::Plots.Plot = plot(plots[:]..., layout = ntasks)
+    #p::Plots.Plot = plot(plots[:]..., layout = ntasks)
+    p = plot(plots[:]..., layout = ntasks)
     display(p)
     TRNOut = "TRNs"*string(fit)
     savefig(TRNOut * ".pdf")
