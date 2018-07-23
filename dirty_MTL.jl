@@ -511,7 +511,7 @@ function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},
         edge_ranks[task] = zeros(npreds, ngenes)
         edge_signs[task] = zeros(npreds, ngenes)
     end
-    for genei = 1:ngenes
+    @showprogress for genei = 1:ngenes
         Ys = Array{Array{Float64,1},1}(ntasks)
         P = Array{Float64,2}(npreds, ntasks)
         for k = 1:ntasks
@@ -534,7 +534,7 @@ function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},
             gene_edge_confs = zeros(npreds)
             currEdgeSigns = zeros(npreds)
             if length(nzeroPreds) > 0
-                nsamps = size(Xs[task],1)
+                nsamps = size(currX,1)
                 if length(nzeroPreds) >=  length(unique(currYs)) #Might want to print a warning for this too
                     sortedIndexes = sortperm(abs.(currBeta[nzeroPreds]), rev = true)
                     nzeroPreds = nzeroPreds[sortedIndexes][1:(length(unique(currYs))-1)]
@@ -542,7 +542,7 @@ function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},
                 currNzeroXs = currX[:,nzeroPreds]
                 rescaledBeta = coef(lm(currNzeroXs, currYs, false))
                 varResidAll = var(currNzeroXs*rescaledBeta - currYs)
-                while isapprox(0, varResidAll; atol = 1e-20) && length(nzeroPreds > 0)
+                while isapprox(0, varResidAll; atol = 1e-20) && length(nzeroPreds) > 0
                     sortedIndexes = sortperm(abs.(rescaledBeta), rev = true)
                     nzeroPreds = nzeroPreds[sortedIndexes][1:(end-1)]
                     currNzeroXs = currX[:,nzeroPreds]
@@ -886,7 +886,7 @@ function MTL(nboots::Int64 = 1)
     cd(OutputDir)
     println("Buliding TRNs using modified ebic")
     confsNet, ranksNet, signNet = buildTRNs(Xs, YSs,
-        Smin = 0.5, Smax = 1., Ssteps = 2, nB = 2, nboots = 1, priors = priors,
+        Smin = 0.02, Smax = 1., Ssteps = 10, nB = 3, nboots = 1, priors = priors,
         fit = :mebic, nsamps = nsamps, ntasks = ntasks)
     println("mEBIC AUPR: ",getAUPR(confsNet, gs, geneNames, TFNames, "mEBIC_NET", TaskNames = TaskNames))
     println("BuildingTRNS using AUPR")
