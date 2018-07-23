@@ -661,8 +661,9 @@ function buildOutputs(confsNet::Array{Float64,2}, targetGenes::Array{String,1},
     nzeroConfs = confsNet[nzero]
     sparseNet = hcat(nzeroTFs, nzeroGenes, nzeroConfs)
     sortedSparseNet = sortrows(sparseNet, by = (x)->x[3], rev = true)
+    NamedSparseNet = ["TF" "Target" "Confidence";sortedSparseNet]
     if filePathName != ""
-        writedlm(filePathName, sortedSparseNet)
+        writedlm(filePathName, NamedSparseNet)
     end
     return sortedSparseNet
 end
