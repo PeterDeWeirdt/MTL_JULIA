@@ -5,8 +5,7 @@ MTL_JULIA is a pipeline for transcriptional regulatory network (TRN) inference u
 1. Castro, Dayanne M., et al. "Multi-study inference of regulatory networks for more accurate models of gene regulation." bioRxiv (2018): 279224.
 2. Miraldi, Emily R., et al. "Leveraging chromatin accessibility for transcriptional regulatory network inference in T Helper 17 Cells." bioRxiv (2018): 292987.
 
-## Description
-### Highlights
+## Highlights
 1. Written in Julia for speed
 2. Parallel and serial implementation options
 3. Variety of parameter options for inference (see **Parameter Options**)
