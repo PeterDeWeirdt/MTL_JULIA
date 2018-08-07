@@ -8,24 +8,59 @@ MTL_JULIA is a pipeline for transcriptional regulatory network (TRN) inference u
 ## Highlights
 1. Written in Julia for speed
 2. Parallel and serial implementation options
-3. Variety of parameter options for inference (see **Parameter Options**)
+3. Variety of parameter options for inference (see **Functionality**)
 
 ![](/images/MTL_TRN_Inference_Workflow.png)
 
 ## Installation 
 1. You need a licensed version of MATLAB
 2. Download [JuliaPro](https://juliacomputing.com/products/juliapro.html) Version 0.6.3 or greater (there are [other](https://julialang.org/downloads/) download options too).
-3. From julia run install.jl to install julia packages.  
+3. Download this github repository.
+3. From julia run *Add_packages.jl* to install julia packages.  
 
-## Basic Usage
+## Th17 Example
+#### Interactive (recomended for first run)
+First we use MATLAB for Transcription factor estimation and prior matrix creation. 
+1. Open *Th17example_setup.m* 
+2. Set options in the script - if you would like to run MATLAB serially:
+```matlab
+parallel = false;
+```
+3. Run *Th17example_setup.m* 
+Now we use the outputs from MATLAB for network inference in Julia. 
+*Note: Julia reads the filepaths for the MATLAB outputs from "setup.txt" in the setup folder, so we don't need to specify these.*
+4. Open *Th17example_inference.jl*
+5. Set options in the script - if you would like to run Julia serially: 
+```julia
+parallel = false
+```
+or with a different number of processors:
+```julia
+Nprocs = 2 
+```
+There are a depth of options for TRN inference using MTL, see **Functionality** for a description. 
+6. Run *Th17example_inference.jl* 
+7. Check the outputs folder for outputs
 
-## Parameter Options 
-### MATLAB
-1. TFA estimation or TF_mRNA: "TFA" or TF_mRNA
-```MATLAB 
-TFA = ''
+#### Shell Script
+The above steps are autonomized in the shell script *Th17example_MTLpipeline.sh*. Before running, change the matlab and julia binary paths:
+```shell
+matlab="/Applications/path/to/bin/matlab"
+julia="/Applications/path/to/bin/julia"
+```
+
+## Functionality
+### Global
+```julia
+getFits = true
+getNetworks = true
+compareGS = true
 ``` 
-### JULIA
+### Parameter Selection
 ```julia
 fitMethod = :ebic
 ```
+
+### Network Inference
+
+### Gold Standard Comparison
