@@ -13,6 +13,9 @@ MTL_JULIA is a pipeline for transcriptional regulatory network (TRN) inference u
 ![](/images/MTL_TRN_Inference_Workflow.png)
 
 ## Installation 
+1. You need a licensed version of MATLAB
+2. Download [JuliaPro](https://juliacomputing.com/products/juliapro.html) Version 0.6.3 or greater (there are [other](https://julialang.org/downloads/) download options too).
+3. From julia run install.jl to install julia packages.  
 
 ## Basic Usage
 
