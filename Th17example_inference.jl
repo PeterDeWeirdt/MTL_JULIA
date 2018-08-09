@@ -20,7 +20,7 @@ if nworkers() != 1
     println("Removing ", nworkers(), " workers")
     rmprocs(workers()[1:end])
 end
-include("julia_fxns/dirty_MTL.jl")
+include("julia_fxns/dirty_MTL.jl/")
 if parallel
     addprocs(Nprocs)
     println(nworkers(), " workers set up")
