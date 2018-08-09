@@ -11,7 +11,7 @@ Nprocs = 3 # Will be ignored if parallel = false
 getFits = true
 getNetworks = true
 compareGS = true
-MainOutputDir = "./outputs/Bulk_Micro_MTL/noBlockPrior/"
+MainOutputDir = "./outputs/Bulk_Micro_MTL/"
 TaskNames = ["Bulk", "MicroArray"]
 if !isdir(MainOutputDir)
     mkdir(MainOutputDir)
@@ -31,7 +31,7 @@ else
 end
 #~ Get Fits ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 if getFits || getNetworks
-    Fit = :ebic # Options- :ebic, :bic, :cv
+    Fit = :ebics # Options- :ebic, :bic, :cv
     FitsOutputDir =  MainOutputDir*join(TaskNames, "_")*"_lambdas_"string(Fit)*"/"
     FitsOutputMat = FitsOutputDir*"Fits.mat"
     if !isdir(FitsOutputDir)
@@ -48,7 +48,7 @@ if getFits
     nB = 3 # Number of lamB's for each lamS
     if parallel
         getFitsParallel(DataMatPaths, Fit, Smin, Smax, Ssteps, nB, TaskNames, FitsOutputDir,
-            FitsOutputMat)
+            FitsOutputMat, nfolds = 2)
     else
         getFitsSerial(DataMatPaths, Fit, Smin, Smax, Ssteps, nB, TaskNames, FitsOutputDir,
             FitsOutputMat)
