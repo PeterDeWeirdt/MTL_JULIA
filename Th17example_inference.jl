@@ -20,7 +20,7 @@ if nworkers() != 1
     println("Removing ", nworkers(), " workers")
     rmprocs(workers()[1:end])
 end
-include("julia_fxns/dirty_MTL.jl/")
+include("julia_fxns/dirty_MTL.jl")
 if parallel
     addprocs(Nprocs)
     println(nworkers(), " workers set up")
@@ -31,7 +31,7 @@ else
 end
 #~ Get Fits ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 if getFits || getNetworks
-    Fit = :ebics # Options- :ebic, :bic, :cv
+    Fit = :ebic # Options- :ebic, :bic, :cv
     FitsOutputDir =  MainOutputDir*join(TaskNames, "_")*"_lambdas_"string(Fit)*"/"
     FitsOutputMat = FitsOutputDir*"Fits.mat"
     if !isdir(FitsOutputDir)
