@@ -14,7 +14,7 @@ function getFitsParallel(DataMatPaths::Array{String, 1}, fit::Symbol, Smin::Floa
     YSs = Array{Array{Float64,2},1}(ntasks)
     priors = Array{Array{Float64,2},1}(ntasks)
     println("Reading in .mat data for Fit inference")
-    @showprogress for task = 1:ntasks
+    for task = 1:ntasks
         inputs = read_matfile(DataMatPaths[task])
         taskMTLinputs[task] = inputs
         Xs[task] = jarray(inputs["predictorMat"])'

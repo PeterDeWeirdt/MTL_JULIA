@@ -1,9 +1,9 @@
 Packages = ["StatsBase", "Plots", "ProgressMeter", "StatPlots", "MATLAB",
     "IterTools", "GLM"]
 println("Adding "*string(length(Packages))* " packages")
-for package = Packages
-    println("package: "*package)
-    Pkg.add(package)
-    end
+for i = 1:length(Packages)
+    println("Adding package "*string(i)*" of "*string(length(Packages))*" ~~ "*Packages[i]*" ~~ ")
+    Pkg.add(Packages[i])
 end
+
 println("Done adding packages")

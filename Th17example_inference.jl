@@ -6,6 +6,7 @@ Author: Peter DeWeirdt, Summer Intern, Divisions of Immunobiology and Biomedical
 =#
 
 #~ Global Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+println("Making Network Inferences")
 parallel = true
 Nprocs = 5 # Number of processors Will be ignored if parallel = false
 getFits = true
@@ -20,12 +21,16 @@ if nworkers() != 1
     println("Removing ", nworkers(), " workers")
     rmprocs(workers()[1:end])
 end
-include("julia_fxns/getMTLParallel.jl")
+include("julia_fxns/dirty_MTL.jl")
 if parallel
     addprocs(Nprocs)
     println(nworkers(), " workers set up")
     @everywhere include("julia_fxns/dirty_MTL.jl")
+    include("julia_fxns/getMTLParallel.jl")
+else
+    include("julia_fxns/getMTLParallel.jl")
 end
+
 
 #~ Get Fits ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 if getFits || getNetworks
