@@ -1,5 +1,8 @@
 #=
-Example Pipeline
+Example Pipeline for Transcriptional Regulatory Network Inference Using
+Multitask Learning
+Author: Peter DeWeirdt, Summer Intern, Divisions of Immunobiology and Biomedical Informatics,
+    Cincinnati Children's Hospital
 =#
 
 #~ Global Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -8,9 +11,8 @@ Nprocs = 3 # Will be ignored if parallel = false
 getFits = true
 getNetworks = true
 compareGS = true
-MainOutputDir = "./outputs/Bulk_Micro_MTL/"
+MainOutputDir = "./outputs/Bulk_Micro_MTL/noBlockPrior/"
 TaskNames = ["Bulk", "MicroArray"]
-
 if !isdir(MainOutputDir)
     mkdir(MainOutputDir)
 end
@@ -29,52 +31,37 @@ else
 end
 #~ Get Fits ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 if getFits || getNetworks
-
-    Fit = :ebic # Options- :ebic, :bic, :cv, :gs
+    Fit = :ebic # Options- :ebic, :bic, :cv
     FitsOutputDir =  MainOutputDir*join(TaskNames, "_")*"_lambdas_"string(Fit)*"/"
     FitsOutputMat = FitsOutputDir*"Fits.mat"
-
     if !isdir(FitsOutputDir)
         mkdir(FitsOutputDir)
     end
 end
 tic()
 if getFits
-
     DataMatPaths = reshape(convert(Array{String,2},
         readdlm("./setup/setup.txt", ',')),2)
-    Smin = 0.05
-    Smax = 1. # Note: float and not int required
-    Ssteps = 5 # This many steps per log10 interval
+    Smin = 0.02
+    Smax = 1. # Note: float required
+    Ssteps = 10 # This many steps per log10 interval for lambdaS
     nB = 3 # Number of lamB's for each lamS
-    #Options for cv - will be ignored otherwise
-    nfolds = 2
-    #Options for gs - will be ignored otherwise
-    extrapolation = false # whether to randomly guess for PR
-    measure = :F1 #MCC, F1, or AUPR
-    rankCol = 3
-    gsString = "./inputs/RNAseq_inputs/priors/KC1p5_sp.tsv"
-    gsTargsString = "./inputs/RNAseq_inputs/priors/goldStandardGeneLists/targGenesPR_mm9mm10.txt"
     if parallel
         getFitsParallel(DataMatPaths, Fit, Smin, Smax, Ssteps, nB, TaskNames, FitsOutputDir,
-            FitsOutputMat, nfolds = nfolds, extrapolation = extrapolation, measure = measure,
-            rankCol = rankCol, gsString = gsString, gsTargsString = gsTargsString)
+            FitsOutputMat)
     else
         getFitsSerial(DataMatPaths, Fit, Smin, Smax, Ssteps, nB, TaskNames, FitsOutputDir,
-            FitsOutputMat, nfolds = nfolds, extrapolation = extrapolation, measure = measure,
-            rankCol = rankCol, gsString = gsString, gsTargsString = gsTargsString)
+            FitsOutputMat)
     end
 end
 FitsTime = toc()
 
 #~ Get Networks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 if getNetworks || compareGS
-
-    nboots = 10
+    nboots = 50
     NetworkOutputDir =  MainOutputDir*join(TaskNames, "_")*"_confs_"*string(nboots)*"bootstraps/"
     NetsOutputMat = NetworkOutputDir*"Networks.mat"
     NetsOutputFiles = [NetworkOutputDir*task*".tsv" for task = TaskNames]
-
     if !isdir(NetworkOutputDir)
         mkdir(NetworkOutputDir)
     end
@@ -101,10 +88,8 @@ if compareGS
     if !isdir(GsOutputDir)
         mkdir(GsOutputDir)
     end
-
-    rankCol = 3
-    extrapolation = false #for AUPR
-
+    rankCol = 3 # What column to rank edge predictions by
+    extrapolation = false # For precision-recall, whether to extrapolate until 100% recall
     getGScomparison(NetsOutputFiles, NetsOutputMat, gsFile, gsTargsFile, rankCol,
         extrapolation, GsOutputDir)
 end

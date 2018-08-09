@@ -11,7 +11,7 @@
 %   Informatics, Cincinnati Children's Hospital
 % Peter DeWeirdt, Summer Intern, Divisions of Immunobiology and Biomedical
 %   Informatics, Cincinnati Children's Hospital
-%% Date: July 30, 2018 -PD
+%% Date: August 7, 2018 -PD
 
 clear all
 close all
@@ -34,7 +34,7 @@ geneExprTFAdirs = cellfun(@(x) [geneExprTFAmainDir '/' x], task_names,...
 normGeneExprFiles = {'./inputs/RNAseq_inputs/geneExpression/th17_RNAseq254_DESeq2_VSDcounts.txt',...
     './inputs/microarray_inputs/geneExpression/microarray_data_mm10.txt'};
 targGeneFile = './inputs/RNAseq_inputs/targRegLists/microarray_RNAseq_targetGenes.txt';
-potRegFile = './inputs/RNAseq_inputs/targRegLists/microarray_RNAseq_targetRegs.txt'; %should be consistent in both folders
+potRegFile = './inputs/RNAseq_inputs/targRegLists/microarray_RNAseq_targetRegs.txt'; 
 tfaGeneFile = './inputs/RNAseq_inputs/targRegLists/genesForTFA.txt';
 geneExprMats = cellfun(@(x) fullfile(x,'geneExprGeneLists.mat'),...
     geneExprTFAdirs, 'UniformOutput', false);

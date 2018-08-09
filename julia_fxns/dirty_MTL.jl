@@ -152,7 +152,7 @@ function dirty_multitask_lasso(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Fl
     P::Array{Float64,2} = Array{Float64,2}(0,0), lamB::Float64 = 0., lamS::Float64 = 0.,
     Cs::Array{Array{Float64, 1},1} = Array{Array{Float64, 1},1}(0), Ds::Array{Array{Float64, 2},1} = Array{Array{Float64, 2},1}(0),
     S::Array{Float64,2} = Array{Float64,2}(0,0), B::Array{Float64,2} = Array{Float64,2}(0,0), maxiter::Int64 = 10000,
-    tolerance::Float64 = 1e-7, score::Bool = false, ntasks::Int64 = 0, npreds::Int64 = 0)
+    tolerance::Float64 = 1e-7, score::Bool = false, ntasks::Int64 = 0, npreds::Int64 = 0, useBlockPrior = true)
     """Fits regression model in which the weights matrix W (predictors x tasks)
     is decomposed in two components: B that captures block structure across tasks
     and S that allows for the differences.
@@ -170,8 +170,12 @@ function dirty_multitask_lasso(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Fl
     end
     if length(S) == 0;S = zeros(npreds, ntasks);end
     if length(B) == 0;B = zeros(npreds, ntasks);end
-    #Make block prior all 1's, except where the sparse prior has inf
-    BPrior = mean(P,2)[:]
+    if useBlockPrior
+        BPrior = mean(P,2)[:]
+    else
+        #Make block prior all 1's, except where the sparse prior has inf
+        BPrior = max.(maximum(P,2), ones(size(P,1)))[:]
+    end
     W = S .+ B
     SOut = zeros(npreds, ntasks)
     BOut = zeros(npreds, ntasks)
