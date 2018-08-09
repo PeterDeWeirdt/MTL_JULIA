@@ -2,7 +2,7 @@ importall StatsBase
 importall Plots
 importall ProgressMeter
 importall StatPlots
-importall MAT #Read/write .MAT files
+importall MATLAB #Read/write .MAT files
 importall IterTools
 importall GLM
-pyplot() #Default for plotting
+gr() #Default for plotting

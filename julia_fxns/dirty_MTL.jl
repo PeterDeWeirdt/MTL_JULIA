@@ -611,14 +611,14 @@ function getGScomparison(NetsOutputFiles::Array{String, 1},
     NetsOutputMat::String, gsFile::String, gsTargsFile::String, rankCol::Int64,
     extrapolation::Bool, GsOutputDir::String;inputNames::Array{String,1} = Array{String,1}(0))
     println("Loading networks")
-    NetsMat = matread(NetsOutputMat)
+    NetsMat = read_matfile(NetsOutputMat)
     if length(inputNames) == 0
-        TaskNames = map(string, NetsMat["TaskNames"])
+        TaskNames = map(string, jvector(NetsMat["TaskNames"]))
     else
         TaskNames = inputNames
     end
-    geneNames = map(string, NetsMat["geneNames"])
-    TFNames = convert(Array{String, 1}, NetsMat["TFNames"])
+    geneNames = map(string, jvector(NetsMat["geneNames"]))
+    TFNames = map(string, jvector(NetsMat["TFNames"]))
     ntasks = length(TaskNames)
     sparseNets = [readdlm(NetPath)[2:end,:] for NetPath = NetsOutputFiles]
     gs = readdlm(gsFile,String)
@@ -627,12 +627,12 @@ function getGScomparison(NetsOutputFiles::Array{String, 1},
     AUPRs, MCCs, F1s, p, InInfMat = getComparison(sparseNets, gs, geneNames, TFNames, rankCol,
         gs_Targs, TaskNames = TaskNames, extrapolation = extrapolation, makePlot = true)
     savefig(p, GsOutputDir*"PR.pdf")
-    matwrite(GsOutputDir*"scores.mat", Dict(
-            "Tasks" => TaskNames,
-            "AUPRs" => AUPRs,
-            "MCCs" => MCCs,
-            "F1s" => F1s
-    ))
+    write_matfile(GsOutputDir*"scores.mat";
+            Tasks = TaskNames,
+            AUPRs = AUPRs,
+            MCCs = MCCs,
+            F1s = F1s
+    )
     writedlm(GsOutputDir*"InferredEdges.tsv",InInfMat)
     println("AUPR: ", round(mean(AUPRs), 3)," | MCC: ", round(mean(MCCs), 3),
         " | F1: ", round(mean(F1s), 3))

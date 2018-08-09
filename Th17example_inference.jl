@@ -7,11 +7,11 @@ Author: Peter DeWeirdt, Summer Intern, Divisions of Immunobiology and Biomedical
 
 #~ Global Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 parallel = true
-Nprocs = 3 # Will be ignored if parallel = false
+Nprocs = 5 # Number of processors Will be ignored if parallel = false
 getFits = true
 getNetworks = true
 compareGS = true
-MainOutputDir = "./outputs/Bulk_Micro_MTL/"
+MainOutputDir = "./outputs/Bulk_Micro_MTL_20/"
 TaskNames = ["Bulk", "MicroArray"]
 if !isdir(MainOutputDir)
     mkdir(MainOutputDir)
@@ -20,18 +20,16 @@ if nworkers() != 1
     println("Removing ", nworkers(), " workers")
     rmprocs(workers()[1:end])
 end
-include("julia_fxns/dirty_MTL.jl")
+include("julia_fxns/getMTLParallel.jl")
 if parallel
     addprocs(Nprocs)
     println(nworkers(), " workers set up")
     @everywhere include("julia_fxns/dirty_MTL.jl")
-    include("julia_fxns/getMTLParallel.jl")
-else
-    include("julia_fxns/getMTLSerial.jl")
 end
+
 #~ Get Fits ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 if getFits || getNetworks
-    Fit = :ebic # Options- :ebic, :bic, :cv
+    Fit = :bic # Options- :ebic, :bic, :cv
     FitsOutputDir =  MainOutputDir*join(TaskNames, "_")*"_lambdas_"string(Fit)*"/"
     FitsOutputMat = FitsOutputDir*"Fits.mat"
     if !isdir(FitsOutputDir)
@@ -42,23 +40,18 @@ tic()
 if getFits
     DataMatPaths = reshape(convert(Array{String,2},
         readdlm("./setup/setup.txt", ',')),2)
-    Smin = 0.02
+    Smin = 0.02 #Is Pretty slow for values less than 0.02
     Smax = 1. # Note: float required
     Ssteps = 10 # This many steps per log10 interval for lambdaS
     nB = 3 # Number of lamB's for each lamS
-    if parallel
-        getFitsParallel(DataMatPaths, Fit, Smin, Smax, Ssteps, nB, TaskNames, FitsOutputDir,
-            FitsOutputMat, nfolds = 2)
-    else
-        getFitsSerial(DataMatPaths, Fit, Smin, Smax, Ssteps, nB, TaskNames, FitsOutputDir,
-            FitsOutputMat)
-    end
+    getFitsParallel(DataMatPaths, Fit, Smin, Smax, Ssteps, nB, TaskNames, FitsOutputDir,
+        FitsOutputMat, nfolds = 2)
 end
 FitsTime = toc()
 
 #~ Get Networks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 if getNetworks || compareGS
-    nboots = 50
+    nboots = 10
     NetworkOutputDir =  MainOutputDir*join(TaskNames, "_")*"_confs_"*string(nboots)*"bootstraps/"
     NetsOutputMat = NetworkOutputDir*"Networks.mat"
     NetsOutputFiles = [NetworkOutputDir*task*".tsv" for task = TaskNames]
@@ -68,11 +61,7 @@ if getNetworks || compareGS
 end
 tic()
 if getNetworks
-    if parallel
-        getNetsParallel(FitsOutputMat, nboots, NetsOutputMat, NetsOutputFiles)
-    else
-        getNetsSerial(FitsOutputMat, nboots, NetsOutputMat, NetsOutputFiles)
-    end
+    getNetsParallel(FitsOutputMat, nboots, NetsOutputMat, NetsOutputFiles)
 end
 NetsTime = toc()
 if parallel

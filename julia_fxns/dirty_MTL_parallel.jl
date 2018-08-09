@@ -280,7 +280,7 @@ function getTaskNetworks_parallel(Xs::Array{Array{Float64,2},1}, YSs::Array{Arra
     ranksNet = Array{Array{Float64,2},1}(ntasks)
     signNet = Array{Array{Float64,2},1}(ntasks)
     countsNet = Array{Array{Float64,2},1}(ntasks)
-    plots = Array{Plots.Plot{Plots.PyPlotBackend},1}(ntasks)
+    plots = Array{Any,1}(ntasks)
     for task = 1:ntasks
         taskCols = ((task-1)*nGenes + 1):task*nGenes
         currMeanConfs = AllNets[1:nTFs, taskCols] ./ nboots

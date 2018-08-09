@@ -15,20 +15,20 @@ function getFitsParallel(DataMatPaths::Array{String, 1}, fit::Symbol, Smin::Floa
     priors = Array{Array{Float64,2},1}(ntasks)
     println("Reading in .mat data for Fit inference")
     @showprogress for task = 1:ntasks
-        inputs = matread(DataMatPaths[task])
+        inputs = read_matfile(DataMatPaths[task])
         taskMTLinputs[task] = inputs
-        Xs[task] = inputs["predictorMat"]'
+        Xs[task] = jarray(inputs["predictorMat"])'
         currSamps = size(Xs[task],1)
         nsamps[task] = currSamps
-        priors[task] = inputs["priorWeightsMat"]'
+        priors[task] = jarray(inputs["priorWeightsMat"])'
         if task == 1
             ngenes = size(priors[1],2)
             nTFs = size(priors[1],1)
         end
-        YSs[task] = inputs["responseMat"]'
+        YSs[task] = jarray(inputs["responseMat"])'
     end
-    geneNames = map(string, vec(Array(taskMTLinputs[1]["targGenes"])))
-    TFNames = map(string, vec(taskMTLinputs[1]["allPredictors"]))
+    geneNames = map(string, jvector(taskMTLinputs[1]["targGenes"]))
+    TFNames = map(string, jvector(taskMTLinputs[1]["allPredictors"]))
     if !isdir(FitsOutputDir)
         mkdir(FitsOutputDir)
     end
@@ -38,7 +38,7 @@ function getFitsParallel(DataMatPaths::Array{String, 1}, fit::Symbol, Smin::Floa
             Smin = Smin, Smax = Smax, Ssteps = Ssteps, nB = nB,
             priors = priors, fit = fit)
     elseif fit == :cv
-        optLams, lambda, Fits, fitPlot = fit_network_cv_parallel(Xs, YSs,
+        optLams, lambdas, Fits, fitPlot = fit_network_cv_parallel(Xs, YSs,
             Smin = Smin, Smax = Smax, Ssteps = Ssteps, nB = nB,
             priors = priors, fit = fit, nfolds = nfolds)
     elseif fit == :gs || throw(ArgumentError("fit not implimented yet"))
@@ -54,32 +54,32 @@ function getFitsParallel(DataMatPaths::Array{String, 1}, fit::Symbol, Smin::Floa
     lamB = optLams[2]
     println("Optimal lambdas - S: ", round(lamS, 3)," | B: ", round(lamB, 3))
     savefig(fitPlot, FitsOutputDir *  "Heatmap.pdf")
-    matwrite(FitsOutputMat, Dict(
-            "lambdas" => lambdas,
-            "networkFits" => Fits,
-            "optLamS" => lamS,
-            "optLamB" => lamB,
-            "Xs" => Xs,
-            "YSs" => YSs,
-            "priors" => priors,
-            "TaskNames" => TaskNames,
-            "geneNames" => geneNames,
-            "TFNames" => TFNames
-    ))
+    write_matfile(FitsOutputMat;
+            lambdas = lambdas,
+            networkFits = Fits,
+            optLamS = lamS,
+            optLamB = lamB,
+            Xs = Xs,
+            YSs = YSs,
+            priors = priors,
+            TaskNames = TaskNames,
+            geneNames = geneNames,
+            TFNames = TFNames
+    )
 end
 
 function getNetsParallel(FitsOutputMat::String, nboots::Int64,
     NetsOutputMat::String, NetsOutputFiles::Array{String,1})
     println("Loading optimal lambdas")
-    FitMat = matread(FitsOutputMat)
-    lamS = FitMat["optLamS"]
-    lamB = FitMat["optLamB"]
-    Xs = convert(Array{Array{Float64,2},1}, FitMat["Xs"])
-    YSs = convert(Array{Array{Float64,2},1}, FitMat["YSs"])
-    priors = convert(Array{Array{Float64,2},1}, FitMat["priors"])
-    TaskNames = convert(Array{String, 1}, FitMat["TaskNames"])
-    geneNames = map(string, FitMat["geneNames"])
-    TFNames = map(string, FitMat["TFNames"])
+    FitMat = read_matfile(FitsOutputMat)
+    lamS = jscalar(FitMat["optLamS"])
+    lamB = jscalar(FitMat["optLamB"])
+    Xs = convert(Array{Array{Float64,2},1}, jvector(FitMat["Xs"]))
+    YSs = convert(Array{Array{Float64,2},1}, jvector(FitMat["YSs"]))
+    priors = convert(Array{Array{Float64,2},1}, jvector(FitMat["priors"]))
+    TaskNames = map(string, jvector(FitMat["TaskNames"]))
+    geneNames = map(string, jvector(FitMat["geneNames"]))
+    TFNames = map(string, jvector(FitMat["TFNames"]))
     println("Getting network")
     sparseNets, p = getTaskNetworks_parallel(Xs, YSs, priors, lamS, lamB, TaskNames,
         nboots, geneNames, TFNames)
@@ -87,9 +87,9 @@ function getNetsParallel(FitsOutputMat::String, nboots::Int64,
         writedlm(NetsOutputFiles[i], sparseNets[i])
     end
     savefig(p, replace(NetsOutputMat, ".mat", ".pdf"))
-    matwrite(NetsOutputMat, Dict(
-        "TaskNames" => TaskNames,
-        "geneNames" => geneNames,
-        "TFNames" => TFNames
-    ))
+    write_matfile(NetsOutputMat;
+        TaskNames = TaskNames,
+        geneNames = geneNames,
+        TFNames = TFNames
+    )
 end

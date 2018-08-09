@@ -1,10 +1,9 @@
-Packages = ["StatsBase", "Plots", "ProgressMeter", "StatPlots", "MAT",
+Packages = ["StatsBase", "Plots", "ProgressMeter", "StatPlots", "MATLAB",
     "IterTools", "GLM"]
-println("Adding "*length(Packages)* " packages")
+println("Adding "*string(length(Packages))* " packages")
 for package = Packages
     println("package: "*package)
-    try Pkg.installed(package)
-    catch Pkg.add(package)
+    Pkg.add(package)
     end
 end
 println("Done adding packages")
