@@ -1,3 +1,8 @@
+#= getMTLParallel.jl
+Read output files, send to dirty_MTL_parallel.jl functions, and write outputs 
+from these files.
+Author: Peter DeWeirdt =#
+
 include("dirty_MTL_parallel.jl")
 
 function getFitsParallel(DataMatPaths::Array{String, 1}, fit::Symbol, Smin::Float64,

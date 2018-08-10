@@ -1,3 +1,7 @@
+# Add_packages.jl
+# Packages for MTL TRN Inference
+# Author: Peter DeWeirdt
+
 Packages = ["StatsBase", "Plots", "ProgressMeter", "StatPlots", "MATLAB",
     "IterTools", "GLM"]
 println("Adding "*string(length(Packages))* " packages")

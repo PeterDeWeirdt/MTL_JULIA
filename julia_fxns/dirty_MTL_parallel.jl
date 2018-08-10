@@ -1,4 +1,7 @@
-#= Parallel functions for Dirty MTL =#
+#= dirty_MTL_parallel.jl
+Parallel functions for MTL TRN Inference. Includes parameter selection functions
+on the network level, and bootstrap functions.
+Author: Peter DeWeirdt =#
 
 function fit_network_ic_parallel(Xs::Array{Array{Float64,2},1},
     YSs::Array{Array{Float64,2},1}; Smin::Float64 = 0.01, Smax::Float64 = 1.,

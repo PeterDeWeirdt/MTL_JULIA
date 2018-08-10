@@ -1,3 +1,6 @@
+#= dependencies.jl
+Dependencies for MTL TRN
+Author: Peter DeWeirdt =#
 importall StatsBase
 importall Plots
 importall ProgressMeter

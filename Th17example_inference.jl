@@ -1,8 +1,16 @@
-#=
+#= Th17example_inference.jl
 Example Pipeline for Transcriptional Regulatory Network Inference Using
 Multitask Learning
-Author: Peter DeWeirdt, Summer Intern, Divisions of Immunobiology and Biomedical Informatics,
-    Cincinnati Children's Hospital
+
+Author: Peter DeWeirdt, Summer Intern, Divisions of Immunobiology and Biomedical
+    Informatics, Cincinnati Children's Hospital
+
+References:
+    Miraldi et al. (2018) "Leveraging chromatin accessibility for
+            transcriptional regulatory network inference in T Helper 17 Cells"
+    Castro, De Veaux, Miraldi, Bonneau. (2018) "Multitask learning for joint
+            inference of gene regulatory networks form several expression datasets"
+    Jalali, et al. (2010) "A dirty model for multi-task learning.
 =#
 
 #~ Global Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -34,7 +42,7 @@ end
 #~ Get Fits ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 if getFits || getNetworks
     Fit = :ebic # Options- :ebic, :bic, :cv
-    tolerance = 1e-7 # Dirty multitask lasso will stop iters when Δβ < tol ∀β
+    tolerance = 1e-7 # Dirty multitask lasso will stop iters when Δβ_j < tol ∀ j
     useBlockPrior = true
     FitsOutputDir =  MainOutputDir*join(TaskNames, "_")*"_lambdas_"string(Fit)*"/"
     FitsOutputMat = FitsOutputDir*"Fits.mat"

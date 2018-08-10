@@ -7,7 +7,7 @@ References:
 (1) Jalali et al. (2010) "A dirty model for multi-task learning."
 (2) Castro, De Veaux, Miraldi, Bonneau. (2018) "Multitask learning for joint inference of gene
     regulatory networks from several expressoin datasets"
-Date: 07/13/2018
+Includes multitask learning algorithm. 
 =#
 include("dependencies.jl")
 

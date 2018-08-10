@@ -11,8 +11,7 @@
 %   Informatics, Cincinnati Children's Hospital
 % Peter DeWeirdt, Summer Intern, Divisions of Immunobiology and Biomedical
 %   Informatics, Cincinnati Children's Hospital
-%% Date: August 7, 2018 -PD
-
+%%
 clear all
 close all
 restoredefaultpath
