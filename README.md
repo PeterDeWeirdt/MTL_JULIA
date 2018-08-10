@@ -6,9 +6,9 @@ MTL_JULIA is a pipeline for transcriptional regulatory network (TRN) inference u
 2. Miraldi, Emily R., et al. "Leveraging chromatin accessibility for transcriptional regulatory network inference in T Helper 17 Cells." bioRxiv (2018): 292987.
 
 ## Highlights
-1. Written in Julia for speed
-2. Parallel and serial implementation options
-3. Parameter selection with cross validation, BIC or EBIC 
+1. Written in Julia for speed. For reference, TRN inference on the Th17 dataset took 37 minutes on a macbook pro running on 6 core processors. 
+2. Parallel implementation 
+3. Parameter selection with EBIC or cross validation
 
 ![](/images/MTL_TRN_Inference_Workflow.png)
 
@@ -28,7 +28,7 @@ parallel = false;
 ```
 3. Run "Th17example_setup.m" 
 Now we use the outputs from MATLAB for network inference in Julia. 
-*Note: Julia reads the filepaths for the MATLAB outputs from "setup.txt" in the setup folder, so we don't need to specify these*
+*Note: Julia reads the filepaths for the MATLAB outputs from "setup.txt" in the setup folder, so no user specification is necessary*
 4. Open "Th17example_inference.jl"
 5. Set options in the script - if you would like to run Julia serially: 
 ```julia
@@ -38,22 +38,29 @@ or with a different number of processors:
 ```julia
 Nprocs = 2 
 ```
+If you would like to check the number of processors on your machine, in Julia you can type
+```julia
+Sys.CPU_CORES 
+```
 There are two main parameter selection strategies to choose from:
 ##### Extended Bayesian Information Criteria
 ```julia
-getFitsParallel(DataMatPaths, :ebic, Smin, Smax, Ssteps, nB, TaskNames, FitsOutputDir,
-            FitsOutputMat)
+Fit = :ebic
+getFitsParallel(DataMatPaths, Fit, Smin, Smax, Ssteps, nB, TaskNames, FitsOutputDir,
+        FitsOutputMat, tolerance = tolerance, useBlockPrior = useBlockPrior)
 ```
 ##### Cross Validation
 ```julia
-getFitsParallel(DataMatPaths, :cv, Smin, Smax, Ssteps, nB, TaskNames, FitsOutputDir,
-            FitsOutputMat, nfolds = 2)
+Fit = :cv
+nfolds = 2
+getFitsParallel(DataMatPaths, Fit, Smin, Smax, Ssteps, nB, TaskNames, FitsOutputDir,
+        FitsOutputMat, tolerance = tolerance, useBlockPrior = useBlockPrior, nfolds = nfolds)
 ```
 6. Run "Th17example_inference.jl"
 7. Check the outputs folder for outputs
 
 #### Shell Script
-The above steps are autonomized in the shell script "Th17example_MTLpipeline.sh." Before running, change the matlab and julia binary paths:
+The above steps are autonomized in the shell script "Th17example_MTLpipeline.sh." Before running, you will likely have to set the matlab and julia binary paths:
 ```shell
 matlab="/Applications/path/to/bin/matlab"
 julia="/Applications/path/to/bin/julia"
