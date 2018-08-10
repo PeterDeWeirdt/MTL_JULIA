@@ -6,13 +6,13 @@ Author: Peter DeWeirdt, Summer Intern, Divisions of Immunobiology and Biomedical
 =#
 
 #~ Global Setup ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-println("Making Network Inferences")
+println("Inferring Networks")
 parallel = true
-Nprocs = 5 # Number of processors Will be ignored if parallel = false
+Nprocs = 6 # Number of processors Will be ignored if parallel = false
 getFits = true
 getNetworks = true
 compareGS = true
-MainOutputDir = "./outputs/Bulk_Micro_MTL_20/"
+MainOutputDir = "./outputs/Bulk_Micro_MTL/"
 TaskNames = ["Bulk", "MicroArray"]
 if !isdir(MainOutputDir)
     mkdir(MainOutputDir)
@@ -31,10 +31,11 @@ else
     include("julia_fxns/getMTLParallel.jl")
 end
 
-
 #~ Get Fits ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 if getFits || getNetworks
-    Fit = :bic # Options- :ebic, :bic, :cv
+    Fit = :ebic # Options- :ebic, :bic, :cv
+    tolerance = 1e-7 # Dirty multitask lasso will stop iters when Δβ < tol ∀β
+    useBlockPrior = true
     FitsOutputDir =  MainOutputDir*join(TaskNames, "_")*"_lambdas_"string(Fit)*"/"
     FitsOutputMat = FitsOutputDir*"Fits.mat"
     if !isdir(FitsOutputDir)
@@ -50,13 +51,13 @@ if getFits
     Ssteps = 10 # This many steps per log10 interval for lambdaS
     nB = 3 # Number of lamB's for each lamS
     getFitsParallel(DataMatPaths, Fit, Smin, Smax, Ssteps, nB, TaskNames, FitsOutputDir,
-        FitsOutputMat, nfolds = 2)
+        FitsOutputMat, tolerance = tolerance, useBlockPrior = useBlockPrior)
 end
 FitsTime = toc()
 
 #~ Get Networks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 if getNetworks || compareGS
-    nboots = 10
+    nboots = 50
     NetworkOutputDir =  MainOutputDir*join(TaskNames, "_")*"_confs_"*string(nboots)*"bootstraps/"
     NetsOutputMat = NetworkOutputDir*"Networks.mat"
     NetsOutputFiles = [NetworkOutputDir*task*".tsv" for task = TaskNames]
@@ -66,7 +67,8 @@ if getNetworks || compareGS
 end
 tic()
 if getNetworks
-    getNetsParallel(FitsOutputMat, nboots, NetsOutputMat, NetsOutputFiles)
+    getNetsParallel(FitsOutputMat, nboots, NetsOutputMat, NetsOutputFiles,
+    tolerance = tolerance, useBlockPrior = useBlockPrior)
 end
 NetsTime = toc()
 if parallel

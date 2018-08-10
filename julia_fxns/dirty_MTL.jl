@@ -224,7 +224,8 @@ end
 
 function ic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
     W::Array{Float64,2}, n_tasks::Int64, n_samples::Array{Int64,1}, n_preds::Int64;
-     gamma::Int64 = 1, fit::Symbol = :ebic)
+    gamma::Int64 = 1, fit::Symbol = :ebic, tolerance::Float64 = 1e-7,
+    useBlockPrior::Bool = true)
     """Calculate the [extended] bayesian information criteria ([E]BIC) for model(s)
     and take the mean of these fits. Note: also allows for BIC fir with fit = :BIC
     Ref: Foygel, Drton. (2010) "Extended Bayesian Information Criteria for Gaussian Graphical Models" """
@@ -269,7 +270,8 @@ function fit_gene_cv(foldInXs::Array{Array{Array{Float64,2},1},1},
     foldInYs::Array{Array{Array{Float64,1},1},1}, foldLOXs::Array{Array{Array{Float64,2},1},1},
     foldLOYs::Array{Array{Array{Float64,1},1},1}, foldDs::Array{Array{Array{Float64,2},1},1},
     ntasks::Int64, npreds::Int64,nsamps::Array{Int64,1}, lamSs::Array{Float64,1};
-    nB::Int64 = 3, prior::Array{Float64,2} = Array{Float64,2}(0,0))
+    nB::Int64 = 3, prior::Array{Float64,2} = Array{Float64,2}(0,0),
+    tolerance::Float64 = 1e-7, useBlockPrior::Bool = true)
     """For one gene, calculate fit for each pair of lamS, lamB using cross validation
     Note: sliding window for lambdaB"""
     nfolds = length(foldInYs)
@@ -297,7 +299,8 @@ function fit_gene_cv(foldInXs::Array{Array{Array{Float64,2},1},1},
             for fold = 1:nfolds
                 W,B,S = dirty_multitask_lasso(foldInXs[fold], foldInYs[fold];
                     P = prior, lamB = lamB, lamS = lamS,
-                    S = S, B = B, ntasks = ntasks, npreds = npreds)
+                    S = S, B = B, ntasks = ntasks, npreds = npreds, tolerance = tolerance,
+                    useBlockPrior = useBlockPrior)
                 sq_err = 0
                 for k = 1:ntasks
                     sq_err += get_RSS(foldLOXs[fold][k],foldLOYs[fold][k],W[:,k])
@@ -320,7 +323,7 @@ end
 function fit_gene_ic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1},
     Ds::Array{Array{Float64,2},1}, ntasks::Int64, npreds::Int64,nsamps::Array{Int64,1},
     lamSs::Array{Float64,1}; nB::Int64 = 3, prior::Array{Float64,2} = Array{Float64,2}(0,0),
-    fit::Symbol = :ebic)
+    fit::Symbol = :ebic, tolerance::Float64 = 1e-7, useBlockPrior::Bool = true)
     """For one gene, calculate fit for each pair of lamS, lamB
     Note: sliding window for lambdaB. Use a warm start.
     Ref: Friedman, Hastie, Tibshirani, 2010 in Journal of Statistical Software
@@ -343,7 +346,8 @@ function fit_gene_ic(Xs::Array{Array{Float64,2},1}, Ys::Array{Array{Float64,1},1
             lamB = lamBs[(nB + 1) - Bi]
             W,B,S = dirty_multitask_lasso(Xs, Ys;
                 P = prior, lamB = lamB, lamS = lamS,
-                Cs = Cs, Ds = Ds, S = S, B = B, ntasks = ntasks, npreds = npreds)
+                Cs = Cs, Ds = Ds, S = S, B = B, ntasks = ntasks, npreds = npreds, tolerance = tolerance,
+                useBlockPrior = useBlockPrior)
             currFit = ic(Xs, Ys, W, ntasks, nsamps, npreds, fit = fit)
             if Bi == 1
                 outerS = S
@@ -392,7 +396,8 @@ end
 
 function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1},
     lamS::Float64, lamB::Float64; priors::Array{Array{Float64,2},1} = Array{Array{Float64,2},1}(0),
-    ntasks::Int64 = 0, npreds::Int64 = 0, ngenes::Int64 = 0, bootstrap::Bool = false)
+    ntasks::Int64 = 0, npreds::Int64 = 0, ngenes::Int64 = 0, bootstrap::Bool = false,
+    tolerance::Float64 = 1e-7, useBlockPrior::Bool = true)
     """Given an optimal lamS and lamB return a matrix of confidences for edge
     interactions, and the sign of those interactions. Current options for methods
     are confidences and ranks.
@@ -433,7 +438,8 @@ function GetBestNets(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},
         Cs,~ = covariance_update_terms(Xs, Ys, calcDs = false, calcCs = true)
         W,B,S = dirty_multitask_lasso(Xs, Ys;
             P = P, lamB = lamB, lamS = lamS,
-            Cs = Cs, Ds = Ds, ntasks = ntasks, npreds = npreds)
+            Cs = Cs, Ds = Ds, ntasks = ntasks, npreds = npreds, tolerance = tolerance,
+            useBlockPrior = useBlockPrior)
         for task = 1:ntasks
             currBeta = W[:,task]
             currYs = Ys[task]

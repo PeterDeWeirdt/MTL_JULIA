@@ -3,7 +3,8 @@
 function fit_network_ic_parallel(Xs::Array{Array{Float64,2},1},
     YSs::Array{Array{Float64,2},1}; Smin::Float64 = 0.01, Smax::Float64 = 1.,
     Ssteps::Int64 = 10, nB::Int64 = 3, priors::Array{Array{Float64,2},1} = Array{Array{Float64,2},1}(0),
-    fit::Symbol = :ebic, npreds::Int64 = 0, nsamps::Array{Int64,1} = Array{Int64,1}(0), ngenes::Int64 = 0)
+    fit::Symbol = :ebic, npreds::Int64 = 0, nsamps::Array{Int64,1} = Array{Int64,1}(0), ngenes::Int64 = 0,
+    tolerance::Float64 = 1e-7, useBlockPrior::Bool = true)
     """Calculate ebic or bic for each gene in a network. Plot grid of median fits.
     Return lambdaS and lambdaB within 1 standard error of the minimum fit."""
     ntasks = length(Xs)
@@ -36,7 +37,8 @@ function fit_network_ic_parallel(Xs::Array{Array{Float64,2},1},
             end
         end
         Fits, currLambdas = fit_gene_ic(Xs, Ys, Ds,
-        ntasks, npreds, nsamps, lamSs, nB = nB, prior = P, fit = fit)
+        ntasks, npreds, nsamps, lamSs, nB = nB, prior = P, fit = fit, tolerance = tolerance,
+        useBlockPrior = useBlockPrior)
         if genei == 1
             ParLambdas[:] =  currLambdas
         end
@@ -60,7 +62,8 @@ end
 function fit_network_cv_parallel(Xs::Array{Array{Float64,2},1},
     YSs::Array{Array{Float64,2},1}; Smin::Float64 = 0.01, Smax::Float64 = 1.,
     Ssteps::Int64 = 10, nB::Int64 = 3, priors::Array{Array{Float64,2},1} = Array{Array{Float64,2},1}(0),
-    fit::Symbol = :ebic, npreds::Int64 = 0, nsamps::Array{Int64,1} = Array{Int64,1}(0), ngenes::Int64 = 0, nfolds::Int64 = 0)
+    fit::Symbol = :ebic, npreds::Int64 = 0, nsamps::Array{Int64,1} = Array{Int64,1}(0), ngenes::Int64 = 0,
+    nfolds::Int64 = 2, tolerance::Float64 = 1e-7, useBlockPrior::Bool = true)
     """Calculate cross validation fit for each gene in a network. Plot grid of median fits.
     Return lambdaS and lambdaB within 1 standard error of the minimum fit."""
     ntasks = length(Xs)
@@ -137,7 +140,8 @@ function fit_network_cv_parallel(Xs::Array{Array{Float64,2},1},
             foldLOYs[fold] = LOYs
         end
         Fits, lambdas = fit_gene_cv(foldInXs,foldInYs,foldLOXs, foldLOYs,
-        foldDs, ntasks, npreds, nsamps, lamSs,nB = nB, prior = P)
+        foldDs, ntasks, npreds, nsamps, lamSs,nB = nB, prior = P, tolerance = tolerance,
+        useBlockPrior = useBlockPrior)
         ParGeneFits[:,genei] = Fits
         if genei == 1
             ParLambdas[:] = lambdas
@@ -163,7 +167,8 @@ function fit_network_GS_parallel(Xs::Array{Array{Float64,2},1},
     TFnames::Array{String,1}; Smin::Float64 = 0.01, Smax::Float64 = 1.,
     Ssteps::Int64 = 10, nB::Int64 = 4, priors::Array{Array{Float64,2},1} = Array{Array{Float64,2},1}(0),
     npreds::Int64 = 0, nsamps::Array{Int64,1} = Array{Int64,1}(0), ngenes::Int64 = 0,
-    extrapolation::Bool = true, measure::Symbol = :MCC, rankCol::Int64 = 3, gsTargsString::String = gsTargsString)
+    extrapolation::Bool = true, measure::Symbol = :MCC, rankCol::Int64 = 3, gsTargsString::String = gsTargsString,
+    tolerance::Float64 = 1e-7, useBlockPrior::Bool = true)
     """Calculate fit for each gene in a network. Plot grid of median fits.
     Return lambdaS and lambdaB within 1 se of the minimum fit."""
     ntasks = length(Xs)
@@ -193,7 +198,8 @@ function fit_network_GS_parallel(Xs::Array{Array{Float64,2},1},
         for Bi = 1:nB
             lamB = lamBs[(nB + 1) - Bi]
             edge_confs, edge_signs = GetBestNets(Xs, YSs,
-                lamS, lamB; priors = priors, ntasks = ntasks)
+                lamS, lamB; priors = priors, ntasks = ntasks, tolerance = tolerance,
+                useBlockPrior = useBlockPrior)
             sparseNets = Array{Array{Any, 2},1}(ntasks)
             for k = 1:ntasks
                 filePathName = ""
@@ -244,7 +250,8 @@ end
 
 function getTaskNetworks_parallel(Xs::Array{Array{Float64,2},1}, YSs::Array{Array{Float64,2},1},
     priors::Array{Array{Float64,2},1}, lamS::Float64, lamB::Float64, TaskNames::Array{String, 1},
-    nboots::Int64, targetGenes::Array{String,1}, targetTFs::Array{String,1})
+    nboots::Int64, targetGenes::Array{String,1}, targetTFs::Array{String,1}; tolerance::Float64 = 1e-7,
+    useBlockPrior::Bool = true)
     """Given optimal lambda pair, return our optimal network"""
     if nboots == 1
         bootstrap = false
@@ -261,7 +268,8 @@ function getTaskNetworks_parallel(Xs::Array{Array{Float64,2},1}, YSs::Array{Arra
     println("Getting bootstrap confidences for "*string(nboots)*" bootstraps")
     getbootstraps = function(i)
         currConfs, currSigns = GetBestNets(Xs, YSs,
-        lamS, lamB, priors = priors, ntasks = ntasks, bootstrap = bootstrap)
+        lamS, lamB, priors = priors, ntasks = ntasks, bootstrap = bootstrap, tolerance = tolerance,
+        useBlockPrior = useBlockPrior)
         for task = 1:ntasks
             taskCols = ((task-1)*nGenes + 1):task*nGenes
             AllNets[1:nTFs, taskCols] .+= currConfs[task]

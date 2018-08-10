@@ -4,7 +4,8 @@ function getFitsParallel(DataMatPaths::Array{String, 1}, fit::Symbol, Smin::Floa
     Smax::Float64, Ssteps::Int64, nB::Int64, TaskNames::Array{String,1},
     FitsOutputDir::String, FitsOutputMat::String; extrapolation::Bool = false,
     measure::Symbol = :MCC, rankCol::Int64 = 3, gsString::String = "",
-    nfolds::Int64 = 2, gsTargsString::String = "")
+    nfolds::Int64 = 2, gsTargsString::String = "", tolerance::Float64 = 1e-7,
+    useBlockPrior::Bool = true)
     ntasks = length(DataMatPaths)
     nsamps = Array{Int64}(ntasks)
     ngenes = Int64
@@ -36,11 +37,13 @@ function getFitsParallel(DataMatPaths::Array{String, 1}, fit::Symbol, Smin::Floa
     if fit == :ebic || fit == :bic
         optLams, lambdas, Fits, fitPlot = fit_network_ic_parallel(Xs, YSs,
             Smin = Smin, Smax = Smax, Ssteps = Ssteps, nB = nB,
-            priors = priors, fit = fit)
+            priors = priors, fit = fit, tolerance = tolerance,
+            useBlockPrior = useBlockPrior)
     elseif fit == :cv
         optLams, lambdas, Fits, fitPlot = fit_network_cv_parallel(Xs, YSs,
             Smin = Smin, Smax = Smax, Ssteps = Ssteps, nB = nB,
-            priors = priors, fit = fit, nfolds = nfolds)
+            priors = priors, fit = fit, nfolds = nfolds, tolerance = tolerance,
+            useBlockPrior = useBlockPrior)
     elseif fit == :gs || throw(ArgumentError("fit not implimented yet"))
         gs = readdlm(gsString,String)
         gs = gs[2:end,1:2]
@@ -48,7 +51,8 @@ function getFitsParallel(DataMatPaths::Array{String, 1}, fit::Symbol, Smin::Floa
             Smin = Smin, Smax = Smax, Ssteps= Ssteps, nB = nB, priors = priors,
             npreds = nTFs, nsamps = nsamps, ngenes = ngenes,
             extrapolation = extrapolation, measure = measure, rankCol = rankCol,
-            gsTargsString = gsTargsString)
+            gsTargsString = gsTargsString, tolerance = tolerance,
+            useBlockPrior = useBlockPrior)
     end
     lamS = optLams[1]
     lamB = optLams[2]
@@ -69,7 +73,8 @@ function getFitsParallel(DataMatPaths::Array{String, 1}, fit::Symbol, Smin::Floa
 end
 
 function getNetsParallel(FitsOutputMat::String, nboots::Int64,
-    NetsOutputMat::String, NetsOutputFiles::Array{String,1})
+    NetsOutputMat::String, NetsOutputFiles::Array{String,1}; tolerance::Float64 = 1e-7,
+    useBlockPrior::Bool = true)
     println("Loading optimal lambdas")
     FitMat = read_matfile(FitsOutputMat)
     lamS = jscalar(FitMat["optLamS"])
@@ -82,7 +87,7 @@ function getNetsParallel(FitsOutputMat::String, nboots::Int64,
     TFNames = map(string, jvector(FitMat["TFNames"]))
     println("Getting network")
     sparseNets, p = getTaskNetworks_parallel(Xs, YSs, priors, lamS, lamB, TaskNames,
-        nboots, geneNames, TFNames)
+        nboots, geneNames, TFNames, tolerance = tolerance, useBlockPrior = useBlockPrior)
     for i = 1:length(sparseNets)
         writedlm(NetsOutputFiles[i], sparseNets[i])
     end
