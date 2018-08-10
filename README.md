@@ -6,7 +6,7 @@ MTL_JULIA is a pipeline for transcriptional regulatory network (TRN) inference u
 2. Miraldi, Emily R., et al. "Leveraging chromatin accessibility for transcriptional regulatory network inference in T Helper 17 Cells." bioRxiv (2018): 292987.
 
 ## Highlights
-1. Written in Julia for speed. For reference, TRN inference on the Th17 dataset took 37 minutes running on 6 cores of a macbook pro. 
+1. Written in Julia for speed. For reference, TRN inference on the Th17 dataset took 37 minutes on a macbook pro running on 6 core processors. 
 2. Parallel implementation 
 3. Parameter selection with EBIC or cross validation
 
