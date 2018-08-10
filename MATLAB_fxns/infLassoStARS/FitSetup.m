@@ -123,7 +123,6 @@ else
     testInds = [];
 end
 
-%% This is where I want to output i think?
 save([FitOutMat '.mat'],'-v7.3',...
     'predictorMat','responseMat','priorMat','lambdaBias','trainInds',...
     'targGenes','priorWeightsMat','allPredictors','conditionsc') 

@@ -42,7 +42,7 @@ end
 #~ Get Fits ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 if getFits || getNetworks
     Fit = :ebic # Options- :ebic, :bic, :cv
-    tolerance = 1e-7 # Dirty multitask lasso will stop iters when Δβ_j < tol ∀ j
+    tolerance = 1e-2 # Dirty multitask lasso will stop iters when Δβ_j < tol ∀ j
     useBlockPrior = true
     FitsOutputDir =  MainOutputDir*join(TaskNames, "_")*"_lambdas_"string(Fit)*"/"
     FitsOutputMat = FitsOutputDir*"Fits.mat"
@@ -54,7 +54,7 @@ tic()
 if getFits
     DataMatPaths = reshape(convert(Array{String,2},
         readdlm("./setup/setup.txt", ',')),2)
-    Smin = 0.02 #Is Pretty slow for values less than 0.02
+    Smin = 0.02 #Note: fits are slow for values less than 0.02
     Smax = 1. # Note: float required
     Ssteps = 10 # This many steps per log10 interval for lambdaS
     nB = 3 # Number of lamB's for each lamS

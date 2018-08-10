@@ -1,1 +1,1 @@
-./outputs/Bulk_Micro_MTL/fitSetup/bulkWmicro_ATAC_Th17_bias50.mat,./outputs/Bulk_Micro_MTL/fitSetup/microWbulk_ATAC_Th17_bias50.mat
+/Users/dewpz7/Documents/MTL_JULIA/outputs/Bulk_Micro_MTL/fitSetup/bulkWmicro_ATAC_Th17_bias50.mat,/Users/dewpz7/Documents/MTL_JULIA/outputs/Bulk_Micro_MTL/fitSetup/microWbulk_ATAC_Th17_bias50.mat

@@ -37,7 +37,7 @@ potRegFile = './inputs/RNAseq_inputs/targRegLists/microarray_RNAseq_targetRegs.t
 tfaGeneFile = './inputs/RNAseq_inputs/targRegLists/genesForTFA.txt';
 geneExprMats = cellfun(@(x) fullfile(x,'geneExprGeneLists.mat'),...
     geneExprTFAdirs, 'UniformOutput', false);
-parallel = true;
+parallel = false;
 if parallel
     if isempty(gcp('nocreate'))
         mypool = parpool();
@@ -84,7 +84,7 @@ netSummaries = cellfun(@(x) [x '_' priorName '_bias' strrep(num2str(100*lambdaBi
 fitOutMats = cellfun(@(x) fullfile(fitDir,x), netSummaries, 'UniformOutput', false);
 fitOutMatsFile = cellfun(@(x) fullfile(fileparts(mfilename('fullpath')),fitDir,[x '.mat']), netSummaries, 'UniformOutput', false);
 disp(fitOutMatsFile)
-setupDir = '../../setup/';
+setupDir = './setup/';
 mkdir(setupDir)
 writetable(cell2table(fitOutMatsFile), fullfile(setupDir,'setup.txt'),'WriteVariableNames',false)
 disp('3. FitSetup.m')
